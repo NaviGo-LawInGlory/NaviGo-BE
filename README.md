@@ -120,3 +120,34 @@ For GitHub Actions CI/CD to work properly, set up these repository secrets:
 -   `SERVER_HOST`: Your production server hostname/IP
 -   `SERVER_USERNAME`: SSH username for your production server
 -   `SERVER_SSH_KEY`: Private SSH key for authentication
+
+### Troubleshooting
+
+#### Database Connection Issues
+
+If you encounter database connection errors like "getaddrinfo for db failed", make sure you're:
+
+1. Running commands inside the Docker container:
+
+    ```
+    docker-compose exec app php artisan migrate
+    ```
+
+2. Using the correct DB_HOST value in your .env file:
+    - Use `DB_HOST=db` when running inside Docker
+    - Use `DB_HOST=127.0.0.1` only when running directly on your host machine and using a local database
+
+#### Docker Container Shell Access
+
+To access your app container's shell:
+
+```
+docker-compose exec app bash
+```
+
+From there, you can run any Laravel commands directly:
+
+```
+php artisan migrate
+php artisan cache:clear
+```
