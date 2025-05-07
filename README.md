@@ -151,3 +151,19 @@ From there, you can run any Laravel commands directly:
 php artisan migrate
 php artisan cache:clear
 ```
+
+#### Docker Deployment Optimization
+
+The project uses a two-step process for Docker-based deployments:
+
+1. **Build and Push**: A separate workflow (`build-docker.yml`) handles building and pushing Docker images to DockerHub
+
+    - Uses layer caching to speed up builds
+    - Only runs when relevant files change
+    - Has extended timeouts for large images
+
+2. **Deploy**: The deployment workflow (`deploy.yml`) pulls and runs the Docker image on the server
+    - Uses timeouts to prevent hanging operations
+    - Updates containers without rebuilding the entire stack
+    - Runs database migrations inside the container
+    - Performs cleanup operations in the background

@@ -7,25 +7,10 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
-
-      - name: Login to DockerHub
-        uses: docker/login-action@v1
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v2
-        with:
-          context: .
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/navigo-backend:latest
 
       - name: Deploy to production server
         uses: appleboy/ssh-action@master
@@ -33,9 +18,40 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          script_stop: true
+          command_timeout: 10m
           script: |
             cd github/NaviGo-BE
-            git pull origin dev
-            docker-compose pull
-            docker-compose up -d
-            docker system prune -af
+
+            # Update repository
+            git fetch --all
+            git reset --hard origin/$([ "${{ github.ref }}" == "refs/heads/main" ] && echo "main" || echo "dev")
+
+            # Pull the latest Docker image with a timeout
+            echo "Pulling Docker image (with 5m timeout)..."
+            timeout 5m docker pull ${{ secrets.DOCKERHUB_USERNAME }}/navigo-backend:latest || echo "Image pull timed out, continuing with deployment..."
+
+            # Update env file if needed
+            if [ -f .env.example ] && [ ! -f .env ]; then
+              cp .env.example .env
+            fi
+
+            # Restart only the app container to use the new image
+            echo "Restarting app container..."
+            docker-compose up -d --no-deps app
+
+            # Run migrations using the container
+            echo "Running migrations..."
+            docker-compose exec -T app php artisan migrate --force
+
+            # Clear cache
+            echo "Clearing cache..."
+            docker-compose exec -T app php artisan optimize:clear
+            docker-compose exec -T app php artisan config:cache
+            docker-compose exec -T app php artisan route:cache
+
+            # Prune unused Docker resources in the background
+            echo "Cleaning up Docker resources..."
+            docker system prune -af --volumes &
+
+            echo "Deployment completed successfully!"
