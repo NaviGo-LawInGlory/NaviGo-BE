@@ -63,8 +63,6 @@ class GeminiController extends Controller
                 'generated_text' => $response->text()
             ]);
 
-        } catch (ApiException $e) {
-            return response()->json(['message' => 'Gemini API error: ' . $e->getMessage()], 500);
         } catch (\Exception $e) {
             return response()->json(['message' => 'Failed to generate content: ' . $e->getMessage()], 500);
         }
