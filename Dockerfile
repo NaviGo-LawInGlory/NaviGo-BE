@@ -29,12 +29,61 @@ COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
 WORKDIR /app
 
-# Ensure scripts directory exists
+# Create scripts directory
 RUN mkdir -p /app/docker/scripts
 
-# Copy entrypoint script
-COPY docker/scripts/entrypoint.sh /app/docker/scripts/entrypoint.sh
-RUN chmod +x /app/docker/scripts/entrypoint.sh
+# Create entrypoint script in a safer way
+RUN echo '#!/bin/sh' > /app/docker/scripts/entrypoint.sh && \
+    echo 'set -e' >> /app/docker/scripts/entrypoint.sh && \
+    echo '' >> /app/docker/scripts/entrypoint.sh && \
+    echo '# Wait for MySQL to be ready' >> /app/docker/scripts/entrypoint.sh && \
+    echo 'echo "Checking database connection..."' >> /app/docker/scripts/entrypoint.sh && \
+    echo 'maxTries=10' >> /app/docker/scripts/entrypoint.sh && \
+    echo 'while [ "$maxTries" -gt 0 ] && ! php artisan db:monitor; do' >> /app/docker/scripts/entrypoint.sh && \
+    echo '    echo "MySQL is unavailable - sleeping"' >> /app/docker/scripts/entrypoint.sh && \
+    echo '    sleep 3' >> /app/docker/scripts/entrypoint.sh && \
+    echo '    maxTries=$(($maxTries - 1))' >> /app/docker/scripts/entrypoint.sh && \
+    echo 'done' >> /app/docker/scripts/entrypoint.sh && \
+    echo '' >> /app/docker/scripts/entrypoint.sh && \
+    echo 'if [ "$maxTries" -le 0 ]; then' >> /app/docker/scripts/entrypoint.sh && \
+    echo '    echo "Could not connect to database - proceeding anyway"' >> /app/docker/scripts/entrypoint.sh && \
+    echo 'fi' >> /app/docker/scripts/entrypoint.sh && \
+    echo '' >> /app/docker/scripts/entrypoint.sh && \
+    echo '# Setup application' >> /app/docker/scripts/entrypoint.sh && \
+    echo 'echo "Setting up application..."' >> /app/docker/scripts/entrypoint.sh && \
+    echo '' >> /app/docker/scripts/entrypoint.sh && \
+    echo '# Ensure proper directory permissions' >> /app/docker/scripts/entrypoint.sh && \
+    echo 'chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache' >> /app/docker/scripts/entrypoint.sh && \
+    echo '' >> /app/docker/scripts/entrypoint.sh && \
+    echo '# Run migrations' >> /app/docker/scripts/entrypoint.sh && \
+    echo 'if [ "$APP_ENV" != "production" ] || [ "$MIGRATE_ON_STARTUP" = "true" ]; then' >> /app/docker/scripts/entrypoint.sh && \
+    echo '    echo "Running database migrations..."' >> /app/docker/scripts/entrypoint.sh && \
+    echo '    php artisan migrate --force' >> /app/docker/scripts/entrypoint.sh && \
+    echo 'fi' >> /app/docker/scripts/entrypoint.sh && \
+    echo '' >> /app/docker/scripts/entrypoint.sh && \
+    echo '# Cache configuration in production' >> /app/docker/scripts/entrypoint.sh && \
+    echo 'if [ "$APP_ENV" = "production" ]; then' >> /app/docker/scripts/entrypoint.sh && \
+    echo '    echo "Optimizing for production..."' >> /app/docker/scripts/entrypoint.sh && \
+    echo '    php artisan config:cache' >> /app/docker/scripts/entrypoint.sh && \
+    echo '    php artisan route:cache' >> /app/docker/scripts/entrypoint.sh && \
+    echo '    php artisan view:cache' >> /app/docker/scripts/entrypoint.sh && \
+    echo 'else' >> /app/docker/scripts/entrypoint.sh && \
+    echo '    echo "Clearing cache for development..."' >> /app/docker/scripts/entrypoint.sh && \
+    echo '    php artisan config:clear' >> /app/docker/scripts/entrypoint.sh && \
+    echo '    php artisan route:clear' >> /app/docker/scripts/entrypoint.sh && \
+    echo '    php artisan view:clear' >> /app/docker/scripts/entrypoint.sh && \
+    echo 'fi' >> /app/docker/scripts/entrypoint.sh && \
+    echo '' >> /app/docker/scripts/entrypoint.sh && \
+    echo '# Create storage link if needed' >> /app/docker/scripts/entrypoint.sh && \
+    echo 'if [ ! -L /var/www/html/public/storage ]; then' >> /app/docker/scripts/entrypoint.sh && \
+    echo '    echo "Creating storage symlink..."' >> /app/docker/scripts/entrypoint.sh && \
+    echo '    php artisan storage:link' >> /app/docker/scripts/entrypoint.sh && \
+    echo 'fi' >> /app/docker/scripts/entrypoint.sh && \
+    echo '' >> /app/docker/scripts/entrypoint.sh && \
+    echo '# Start PHP-FPM' >> /app/docker/scripts/entrypoint.sh && \
+    echo 'echo "Starting PHP-FPM..."' >> /app/docker/scripts/entrypoint.sh && \
+    echo 'exec "$@"' >> /app/docker/scripts/entrypoint.sh && \
+    chmod +x /app/docker/scripts/entrypoint.sh
 
 # Copy composer files and install dependencies
 COPY composer.json composer.lock ./

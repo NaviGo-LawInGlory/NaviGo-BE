@@ -14,5 +14,7 @@ yarn-error.log
 /.vagrant
 .DS_Store
 tests
-docker
+# Keep the docker/scripts directory
+docker/*
+!docker/scripts
 README.md
