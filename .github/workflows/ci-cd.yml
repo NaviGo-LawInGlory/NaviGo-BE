@@ -189,7 +189,20 @@ jobs:
 
             # Stop any existing containers to free up resources
             echo "Stopping existing services..."
-            docker-compose down || true
+            docker-compose down --remove-orphans || true
+
+            # Check for port conflicts and handle them
+            echo "Checking for port conflicts..."
+            if netstat -tuln | grep -q ':3306'; then
+              echo "Port 3306 is already in use. Using alternative port 33306 for MySQL."
+              # Ensure docker-compose file uses port 33306
+              sed -i 's/"3306:3306"/"33306:3306"/g' docker-compose.yml || true
+            fi
+
+            if netstat -tuln | grep -q ':9091'; then
+              echo "Port 9091 is already in use. Using alternative port 9092 for web service."
+              sed -i 's/"9091:80"/"9092:80"/g' docker-compose.yml || true
+            fi
 
             # Do system cleanup before pulling new images
             echo "Performing system cleanup..."
@@ -223,15 +236,42 @@ jobs:
               cp .env.example .env
             fi
 
-            # Start services in stages
-            echo "Starting database service first..."
-            docker-compose up -d mysql
+            # Update DB settings in .env to match docker-compose ports
+            if grep -q "33306" docker-compose.yml; then
+              echo "Updating .env to use port 33306 for database connections..."
+              if [ -f .env ]; then
+                sed -i 's/DB_PORT=3306/DB_PORT=33306/g' .env || true
+              fi
+            fi
 
-            echo "Waiting for database to initialize..."
-            sleep 30
-
-            echo "Starting remaining services..."
-            docker-compose up -d
+            # Try to start containers with error handling
+            echo "Starting services with retries..."
+            MAX_START_RETRIES=3
+            for i in $(seq 1 $MAX_START_RETRIES); do
+              echo "Start attempt $i of $MAX_START_RETRIES..."
+              
+              # Start database first with a separate try-catch
+              if docker-compose up -d mysql; then
+                echo "MySQL started successfully. Waiting 30 seconds for initialization..."
+                sleep 30
+                
+                # Now try to start the remaining services
+                if docker-compose up -d; then
+                  echo "All services started successfully!"
+                  break
+                fi
+              fi
+              
+              if [ $i -eq $MAX_START_RETRIES ]; then
+                echo "Warning: Failed to start all services after $MAX_START_RETRIES attempts."
+                docker-compose ps
+                echo "Continuing deployment process anyway..."
+              else
+                echo "Start attempt $i failed. Stopping containers and trying again..."
+                docker-compose down --remove-orphans
+                sleep 10
+              fi
+            done
 
             # Run migrations with increased timeout and retries
             echo "Running migrations..."
@@ -259,6 +299,9 @@ jobs:
             # Verify deployment success
             if docker-compose ps | grep -q "Up"; then
               echo "Deployment completed successfully!"
+              docker-compose ps
             else
               echo "Warning: Some containers may not be running properly."
               docker-compose ps
+              echo "Deployment completed with warnings."
+            fi
