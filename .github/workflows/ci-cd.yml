@@ -72,6 +72,7 @@ jobs:
     if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
     env:
       BRANCH: ${{ github.ref_name }}
+      FORCE_REBUILD: ${{ github.event.head_commit.message == '#rebuild' || github.event.head_commit.message == 'force-rebuild' || contains(github.event.head_commit.message, '[rebuild]') }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -85,21 +86,36 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
+      - name: Clean Docker cache when forced
+        if: ${{ env.FORCE_REBUILD == 'true' }}
+        run: docker buildx prune -f
+
       - name: Build and push Docker image
         run: |
           echo "Building image for branch: $BRANCH"
+          CACHE_FLAG=""
+
+          if [[ "$FORCE_REBUILD" == "true" ]]; then
+            CACHE_FLAG="--no-cache"
+            echo "Force rebuild detected - building without cache"
+          fi
+
           case "$BRANCH" in
             "main")
               echo "Building production image..."
               docker buildx build --push \
+                $CACHE_FLAG \
                 --tag ${{ secrets.DOCKERHUB_USERNAME }}/navigo:latest \
                 --tag ${{ secrets.DOCKERHUB_USERNAME }}/navigo:prod \
+                --build-arg BUILDKIT_INLINE_CACHE=0 \
                 --file Dockerfile .
               ;;
             "dev")
               echo "Building development image..."
               docker buildx build --push \
+                $CACHE_FLAG \
                 --tag ${{ secrets.DOCKERHUB_USERNAME }}/navigo:dev \
+                --build-arg BUILDKIT_INLINE_CACHE=0 \
                 --file Dockerfile .
               ;;
             *)
@@ -134,7 +150,9 @@ jobs:
 
             echo "Deploying branch: $BRANCH"
 
-            # Set environment variables for secrets
+            echo "Cleaning up Docker system..."
+            docker system prune -af --volumes || echo "Cleanup failed but continuing..."
+
             export GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}"
             export GOOGLE_CLIENT_SECRET="${{ secrets.GOOGLE_CLIENT_SECRET }}"
             export GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}"
@@ -144,50 +162,39 @@ jobs:
               cd github/NaviGo-BE || { echo "Directory ~/navigo/production not found."; exit 1; }
               echo "Deploying production environment..."
               
-              # Pull latest docker-compose config
               wget -O docker-compose.prod.yml https://raw.githubusercontent.com/NaviGo-LawInGlory/NaviGo-BE/main/docker-compose.prod.yml
               
-              # Stop existing containers
               docker-compose -f docker-compose.prod.yml down
               
-              # Pull latest image
               docker pull ${{ secrets.DOCKERHUB_USERNAME }}/navigo:prod
               
-              # Start containers with environment variables
               DB_PASSWORD="$DB_PASSWORD" \
               GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" \
               GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET" \
               GEMINI_API_KEY="$GEMINI_API_KEY" \
               docker-compose -f docker-compose.prod.yml up -d
               
-              # Run migrations
               docker-compose -f docker-compose.prod.yml exec -T app php artisan migrate --force
               
             else
               cd github/NaviGo-BE || { echo "Directory ~/navigo/development not found."; exit 1; }
               echo "Deploying development environment..."
               
-              # Pull latest docker-compose config
               wget -O docker-compose.dev.yml https://raw.githubusercontent.com/NaviGo-LawInGlory/NaviGo-BE/dev/docker-compose.dev.yml
               
-              # Stop existing containers
               docker-compose -f docker-compose.dev.yml down
               
-              # Pull latest image
               docker pull ${{ secrets.DOCKERHUB_USERNAME }}/navigo:dev
               
-              # Start containers with environment variables
               DB_PASSWORD="$DB_PASSWORD" \
               GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" \
               GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET" \
               GEMINI_API_KEY="$GEMINI_API_KEY" \
               docker-compose -f docker-compose.dev.yml up -d
               
-              # Run migrations with fresh data
               docker-compose -f docker-compose.dev.yml exec -T app php artisan migrate:fresh --seed
             fi
 
-            # Clean up unused Docker resources
             docker system prune -af --volumes
 
             echo "Deployment completed successfully."

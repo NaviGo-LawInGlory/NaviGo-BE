@@ -167,3 +167,19 @@ The project uses a two-step process for Docker-based deployments:
     - Updates containers without rebuilding the entire stack
     - Runs database migrations inside the container
     - Performs cleanup operations in the background
+
+### CI/CD Best Practices
+
+#### Force Rebuilding Docker Images
+
+You can force a complete rebuild of Docker images (ignoring cache) by including specific keywords in your commit message:
+
+-   Include `#rebuild` in your commit message
+-   Include `force-rebuild` in your commit message
+-   Include `[rebuild]` in your commit message
+
+Example:
+
+```
+git commit -m "Update dependencies #rebuild"
+```

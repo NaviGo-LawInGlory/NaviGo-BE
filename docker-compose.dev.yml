@@ -6,6 +6,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=0
     container_name: navigo_app_dev
     volumes:
       - ./:/var/www/html
