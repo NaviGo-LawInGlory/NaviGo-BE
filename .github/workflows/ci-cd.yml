@@ -141,6 +141,9 @@ jobs:
           build-args: |
             PHP_VERSION=8.2
             COMPOSER_INSTALL_FLAGS=--no-dev --optimize-autoloader
+          # Add more debug output
+          no-cache: false
+          provenance: false
 
       # Temp fix for cache
       - name: Move cache
