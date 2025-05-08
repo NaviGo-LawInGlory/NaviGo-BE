@@ -149,7 +149,6 @@ jobs:
             fi
 
             echo "Deploying branch: $BRANCH"
-
             echo "Cleaning up Docker system..."
             docker system prune -af --volumes || echo "Cleanup failed but continuing..."
 
