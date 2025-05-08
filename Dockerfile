@@ -1,5 +1,5 @@
 # Stage 1: Composer dependencies with Alpine
-FROM composer:2-alpine AS composer
+FROM composer:alpine AS composer
 
 WORKDIR /app
 COPY composer.json composer.lock ./
