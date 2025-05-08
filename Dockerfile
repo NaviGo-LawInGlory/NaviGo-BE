@@ -12,30 +12,47 @@ RUN composer install --prefer-dist --no-scripts --no-dev --no-autoloader --optim
 COPY . .
 
 # Stage 2: Production PHP environment
-FROM php:8.2-fpm
+FROM php:8.2-fpm-alpine
 
-# Install system dependencies in a single layer
-RUN apt-get update && apt-get install -y \
-        libpng-dev \
-        libjpeg-dev \
-        libfreetype6-dev \
-        libzip-dev \
+# Install essential dependencies and extensions
+RUN apk add --no-cache \
+        nginx \
+        supervisor \
+        libpng \
+        libjpeg-turbo \
+        libzip \
+        freetype \
         zip \
         unzip \
         curl \
-        nginx \
-        supervisor \
+        libpng-dev \
+        libjpeg-turbo-dev \
+        libzip-dev \
+        freetype-dev \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install -j$(nproc) gd pdo pdo_mysql zip exif pcntl bcmath \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && docker-php-ext-install -j$(nproc) \
+        pdo_mysql \
+        bcmath \
+        zip \
+    && pecl install \
+        pcntl \
+        exif \
+    && docker-php-ext-enable \
+        pcntl \
+        exif \
+    && apk del --no-cache \
+        libpng-dev \
+        libjpeg-turbo-dev \
+        libzip-dev \
+        freetype-dev
 
 # Configure PHP and Nginx
 COPY docker/php/local.ini /usr/local/etc/php/conf.d/local.ini
-COPY docker/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf
+COPY docker/nginx/conf.d/default.conf /etc/nginx/http.d/default.conf
 
 # Create supervisor config file
-COPY --chmod=644 <<'EOF' /etc/supervisor/conf.d/supervisord.conf
+RUN mkdir -p /etc/supervisor.d/
+COPY --chmod=644 <<'EOF' /etc/supervisor.d/supervisord.ini
 [supervisord]
 nodaemon=true
 
@@ -67,4 +84,4 @@ RUN mkdir -p /var/www/html/storage/framework/{cache,sessions,views} \
 EXPOSE 80
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor.d/supervisord.ini"]
