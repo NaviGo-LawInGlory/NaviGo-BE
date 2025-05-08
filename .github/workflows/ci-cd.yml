@@ -15,11 +15,24 @@ on:
       - dev
 
 jobs:
+  debug-trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Debug workflow trigger
+        run: |
+          echo "Workflow triggered!"
+          echo "Branch name: ${{ github.ref }}"
+          echo "Event name: ${{ github.event_name }}"
+          echo "Repository: ${{ github.repository }}"
+
   build-and-test:
+    needs: debug-trigger
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+          ref: ${{ github.ref }}
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
@@ -43,6 +56,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Display branch information
+        run: |
+          echo "Building for branch: ${{ github.ref_name }}"
+          echo "Full ref: ${{ github.ref }}"
 
       - name: Set up Docker Buildx
         id: buildx
@@ -98,7 +118,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/navigo-backend:${{ env.BRANCH == 'main' && 'latest' || 'dev' }}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/navigo-backend:${{ github.ref_name == 'main' && 'latest' || 'dev' }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
@@ -124,6 +144,9 @@ jobs:
       BRANCH: ${{ github.ref_name }}
     timeout-minutes: 15
     steps:
+      - name: Debug deployment branch
+        run: echo "Deploying branch ${{ github.ref_name }}"
+
       - name: Deploy to production server
         uses: appleboy/ssh-action@master
         with:
@@ -148,7 +171,7 @@ jobs:
             # Pull the latest Docker image with a timeout
             echo "Pulling Docker image (with retry)..."
             for i in 1 2 3; do
-              if timeout 2m docker pull ${{ secrets.DOCKERHUB_USERNAME }}/navigo-backend:${{ env.BRANCH == 'main' ? 'latest' : 'dev' }}; then
+              if timeout 2m docker pull ${{ secrets.DOCKERHUB_USERNAME }}/navigo-backend:${{ github.ref_name == 'main' && 'latest' || 'dev' }}; then
                 echo "Image pull successful!"
                 break
               fi
