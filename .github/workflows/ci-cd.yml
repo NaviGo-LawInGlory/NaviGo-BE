@@ -1,0 +1,198 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+    paths-ignore:
+      - "**.md"
+      - ".github/**"
+      - "!.github/workflows/ci-cd.yml"
+  pull_request:
+    branches:
+      - main
+      - dev
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: mbstring, pdo_mysql, exif, pcntl, bcmath, zip, intl, opcache
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress
+
+      - name: Run tests
+        run: php artisan test
+
+  docker:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' }}
+    env:
+      BRANCH: ${{ github.ref_name }}
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v2
+        with:
+          version: latest
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      # Cache Docker layers
+      - name: Set up Docker layer caching
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      # Extract metadata for Docker
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/navigo-backend
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=
+            latest
+
+      # Optimize composer install in a separate step
+      - name: Build composer dependencies image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./docker/composer.Dockerfile
+          push: false
+          tags: composer-deps:latest
+          target: composer-deps
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          outputs: type=docker,dest=/tmp/composer-deps.tar
+
+      # Build final image based on branch
+      - name: Build and push final image
+        id: docker_build
+        uses: docker/build-push-action@v4
+        timeout-minutes: 30
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/navigo-backend:${{ env.BRANCH == 'main' && 'latest' || 'dev' }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          build-args: |
+            PHP_VERSION=8.2
+            COMPOSER_INSTALL_FLAGS=--no-dev --optimize-autoloader
+
+      # Temp fix for cache
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
+
+      # Report build result
+      - name: Image digest
+        run: echo ${{ steps.docker_build.outputs.digest }}
+
+  deploy:
+    needs: docker
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' }}
+    env:
+      BRANCH: ${{ github.ref_name }}
+    timeout-minutes: 15
+    steps:
+      - name: Deploy to production server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script_stop: true
+          command_timeout: 10m
+          script: |
+            set -e
+            trap 'echo "An error occurred. Exiting..." && exit 1' ERR
+
+            BRANCH="${{ github.ref_name }}"
+            echo "Deploying branch: $BRANCH"
+
+            cd github/NaviGo-BE
+
+            # Update the repository but don't build from it
+            git fetch --all
+            git reset --hard origin/$BRANCH
+
+            # Pull the latest Docker image with a timeout
+            echo "Pulling Docker image (with retry)..."
+            for i in 1 2 3; do
+              if timeout 2m docker pull ${{ secrets.DOCKERHUB_USERNAME }}/navigo-backend:${{ env.BRANCH == 'main' ? 'latest' : 'dev' }}; then
+                echo "Image pull successful!"
+                break
+              fi
+              echo "Image pull attempt $i failed, retrying..."
+              if [ $i -eq 3 ]; then
+                echo "All pull attempts failed. Using cached image."
+              fi
+              sleep 5
+            done
+
+            # Update env file if needed
+            if [ -f .env.example ] && [ ! -f .env ]; then
+              cp .env.example .env
+            fi
+
+            # Use simplified restart command
+            echo "Restarting services..."
+            docker-compose stop app
+            docker-compose rm -f app
+            docker-compose up -d app
+
+            # Run migrations using the container with retries
+            echo "Running migrations..."
+            for i in 1 2 3; do
+              if docker-compose exec -T app php artisan migrate --force; then
+                echo "Migration successful!"
+                break
+              fi
+              echo "Migration attempt $i failed, retrying..."
+              sleep 5
+              if [ $i -eq 3 ]; then
+                echo "All migration attempts failed."
+                exit 1
+              fi
+            done
+
+            # Clear cache with safer commands
+            echo "Clearing cache..."
+            docker-compose exec -T app php artisan config:clear
+            docker-compose exec -T app php artisan config:cache
+            docker-compose exec -T app php artisan route:cache
+
+            # Cleanly exit before background tasks
+            echo "Deployment completed successfully!"
+
+            # Run cleanup as a background task that can safely timeout
+            (docker system prune -af --volumes && echo "Cleanup completed") &

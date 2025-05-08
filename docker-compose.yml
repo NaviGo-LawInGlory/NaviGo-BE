@@ -1,61 +1,124 @@
 version: "3.8"
 
 services:
-    # PHP Service
+    mysql:
+        image: mysql:8.0
+        container_name: navigo_mysql_dev
+        environment:
+            - MYSQL_DATABASE=navigo
+            - MYSQL_ROOT_PASSWORD=123456789
+            - MYSQL_PASSWORD=123456789
+            - MYSQL_USER=root
+            - MYSQL_TIMEZONE=UTC
+        ports:
+            - "3306:3306"
+        volumes:
+            - mysql_data_dev:/var/lib/mysql
+        networks:
+            - navigo_network
+        healthcheck:
+            test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 10s
+
+    mailhog:
+        image: mailhog/mailhog
+        container_name: navigo_mailhog_dev
+        ports:
+            - "1025:1025"
+            - "8025:8025"
+        networks:
+            - navigo_network
+        restart: always
+
     app:
         build:
             context: .
             dockerfile: Dockerfile
-        image: navigo-backend
-        container_name: navigo-app
-        restart: unless-stopped
-        working_dir: /var/www/html
-        volumes:
-            - ./:/var/www/html
-            - ./docker/php/local.ini:/usr/local/etc/php/conf.d/local.ini
-        networks:
-            - navigo-network
-        depends_on:
-            - db
+        container_name: navigo_backend_dev
+        environment:
+            # Database Configuration
+            - DB_CONNECTION=mysql
+            - DB_HOST=mysql
+            - DB_PORT=3306
+            - DB_DATABASE=navigo
+            - DB_USERNAME=root
+            - DB_PASSWORD=123456789
 
-    # Nginx Service
+            # Application settings
+            - APP_NAME=NaviGo
+            - APP_ENV=local
+            - APP_DEBUG=true
+            - APP_URL=http://localhost:9091
+            - APP_KEY=${APP_KEY}
+
+            # Mail Configuration
+            - MAIL_MAILER=smtp
+            - MAIL_HOST=mailhog
+            - MAIL_PORT=1025
+            - MAIL_USERNAME=null
+            - MAIL_PASSWORD=null
+            - MAIL_ENCRYPTION=null
+            - MAIL_FROM_ADDRESS=admin@navigo.app
+            - MAIL_FROM_NAME=NaviGo
+
+            # Other settings
+            - SESSION_DRIVER=database
+            - QUEUE_CONNECTION=database
+            - FILESYSTEM_DISK=local
+            - CACHE_STORE=database
+
+            # Google OAuth configuration
+            - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+            - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+            - GOOGLE_REDIRECT_URI=${APP_URL}/api/v1/auth/google/callback
+
+            # Gemini API Key
+            - GEMINI_API_KEY=${GEMINI_API_KEY}
+
+        volumes:
+            - ./logs:/var/www/html/storage/logs
+            - ./storage:/var/www/html/storage
+        ports:
+            - "9000:9000"
+        depends_on:
+            - mysql
+            - mailhog
+        networks:
+            - navigo_network
+        restart: always
+        healthcheck:
+            test: ["CMD", "php", "artisan", "health:check"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 10s
+
     web:
         image: nginx:alpine
-        container_name: navigo-nginx
-        restart: unless-stopped
+        container_name: navigo_nginx_dev
         ports:
-            - "8000:80"
+            - "9091:80"
         volumes:
-            - ./:/var/www/html
+            - ./:/var/www/html:ro
             - ./docker/nginx/conf.d/:/etc/nginx/conf.d/
-        networks:
-            - navigo-network
         depends_on:
             - app
-
-    # MySQL Service
-    db:
-        image: mysql:8.0
-        container_name: navigo-db
-        restart: unless-stopped
-        environment:
-            MYSQL_DATABASE: ${DB_DATABASE}
-            MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
-            MYSQL_PASSWORD: ${DB_PASSWORD}
-            MYSQL_USER: ${DB_USERNAME}
-            SERVICE_TAGS: dev
-            SERVICE_NAME: mysql
-        volumes:
-            - navigo-db-data:/var/lib/mysql
-        ports:
-            - "3306:3306"
         networks:
-            - navigo-network
+            - navigo_network
+        restart: always
+        healthcheck:
+            test: ["CMD", "nginx", "-t"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 5s
 
 networks:
-    navigo-network:
+    navigo_network:
         driver: bridge
 
 volumes:
-    navigo-db-data:
-        driver: local
+    mysql_data_dev:
