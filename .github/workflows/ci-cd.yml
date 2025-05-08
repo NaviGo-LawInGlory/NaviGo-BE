@@ -167,7 +167,7 @@ jobs:
               echo "Deploying development environment..."
               
               # Pull latest docker-compose config
-              wget -O docker-compose.dev.yml https://raw.githubusercontent.com/NaviGo-LawInGlory/NaviGo-LawInGlory/dev/docker-compose.dev.yml
+              wget -O docker-compose.dev.yml https://raw.githubusercontent.com/NaviGo-LawInGlory/NaviGo-BE/dev/docker-compose.dev.yml
               
               # Stop existing containers
               docker-compose -f docker-compose.dev.yml down
