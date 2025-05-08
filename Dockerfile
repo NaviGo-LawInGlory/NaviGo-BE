@@ -1,53 +1,54 @@
-# Stage 1: Composer dependencies
-FROM composer:2 AS composer
+# Stage 1: Composer dependencies with Alpine
+FROM composer:2-alpine AS composer
 
 WORKDIR /app
 COPY composer.json composer.lock ./
-RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist
+RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist --optimize-autoloader
 
 COPY . .
 RUN composer dump-autoload --no-dev --optimize
 
-# Stage 2: PHP runtime
-FROM php:8.2-fpm
+# Stage 2: Minimal PHP runtime with Alpine
+FROM php:8.2-fpm-alpine
 
-# Install essential packages and PHP extensions
-RUN apt-get update && apt-get install -y \
-    nginx \
-    zip \
-    unzip \
-    supervisor \
-    && docker-php-ext-install pdo_mysql \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+# Install only essential packages and PDO MySQL extension
+RUN apk add --no-cache nginx && \
+    docker-php-ext-install pdo_mysql
 
-# Configure nginx and PHP
-COPY docker/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf
-COPY docker/php/local.ini /usr/local/etc/php/conf.d/local.ini
+# Configure PHP with inline settings
+RUN echo "upload_max_filesize=40M\npost_max_size=40M\nmemory_limit=256M" > /usr/local/etc/php/conf.d/custom.ini
 
-# Configure Supervisor
-RUN echo "[supervisord]\nnodaemon=true\n\n\
-[program:php-fpm]\ncommand=php-fpm\n\n\
-[program:nginx]\ncommand=nginx -g 'daemon off;'" > /etc/supervisor/conf.d/supervisord.conf
+# Configure Nginx with inline config
+RUN echo 'server {\n\
+    listen 80;\n\
+    root /var/www/html/public;\n\
+    index index.php;\n\
+    location / {\n\
+        try_files $uri $uri/ /index.php?$query_string;\n\
+    }\n\
+    location ~ \.php$ {\n\
+        fastcgi_pass 127.0.0.1:9000;\n\
+        fastcgi_index index.php;\n\
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n\
+        include fastcgi_params;\n\
+    }\n\
+}' > /etc/nginx/http.d/default.conf
 
 # Copy application files
 WORKDIR /var/www/html
 COPY --chown=www-data:www-data --from=composer /app /var/www/html
 
 # Setup storage directories
-RUN mkdir -p /var/www/html/storage/framework/{cache,sessions,views} \
-    && mkdir -p /var/www/html/storage/logs \
-    && chown -R www-data:www-data /var/www/html/storage
+RUN mkdir -p /var/www/html/storage/framework/{cache,sessions,views} && \
+    mkdir -p /var/www/html/storage/logs && \
+    chown -R www-data:www-data /var/www/html/storage
 
-# Create a simple entrypoint script
+# Create a simple startup script instead of using supervisor
 RUN echo '#!/bin/sh\n\
-set -e\n\
-chown -R www-data:www-data /var/www/html/storage\n\
-php artisan storage:link || true\n\
-exec "$@"' > /entrypoint.sh \
-    && chmod +x /entrypoint.sh
+php-fpm -D\n\
+nginx -g "daemon off;"' > /start.sh && \
+chmod +x /start.sh
 
 EXPOSE 80
 
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+CMD ["/start.sh"]
