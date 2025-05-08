@@ -150,7 +150,7 @@ jobs:
               docker-compose -f docker-compose.prod.yml down
               
               # Pull latest image
-              docker pull ${{ secrets.DOCKER_USERNAME }}/navigo:prod
+              docker pull ${{ secrets.DOCKERHUB_USERNAME }}/navigo:prod
               
               # Start containers with environment variables
               DB_PASSWORD="$DB_PASSWORD" \
@@ -173,7 +173,7 @@ jobs:
               docker-compose -f docker-compose.dev.yml down
               
               # Pull latest image
-              docker pull ${{ secrets.DOCKER_USERNAME }}/navigo:dev
+              docker pull ${{ secrets.DOCKERHUB_USERNAME }}/navigo:dev
               
               # Start containers with environment variables
               DB_PASSWORD="$DB_PASSWORD" \
