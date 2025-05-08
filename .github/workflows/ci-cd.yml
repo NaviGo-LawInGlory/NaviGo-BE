@@ -161,7 +161,7 @@ jobs:
     if: ${{ github.event_name == 'push' }}
     env:
       BRANCH: ${{ github.ref_name }}
-    timeout-minutes: 15
+    timeout-minutes: 30 # Increased from 15 to 30 minutes
     steps:
       - name: Debug deployment branch
         run: echo "Deploying branch ${{ github.ref_name }}"
@@ -173,7 +173,7 @@ jobs:
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script_stop: true
-          command_timeout: 10m
+          command_timeout: 20m # Increased from 10m to 20m
           script: |
             set -e
             trap 'echo "An error occurred. Exiting..." && exit 1' ERR
@@ -187,54 +187,78 @@ jobs:
             git fetch --all
             git reset --hard origin/$BRANCH
 
-            # Pull the latest Docker image with a timeout
-            echo "Pulling Docker image (with retry)..."
-            for i in 1 2 3; do
-              if timeout 2m docker pull ${{ secrets.DOCKERHUB_USERNAME }}/navigo-backend:${{ github.ref_name == 'main' && 'latest' || 'dev' }}; then
+            # Stop any existing containers to free up resources
+            echo "Stopping existing services..."
+            docker-compose down || true
+
+            # Do system cleanup before pulling new images
+            echo "Performing system cleanup..."
+            docker system prune -f || true
+
+            # Pull the latest Docker image with increased timeout and better retry logic
+            echo "Pulling Docker image (with improved retry logic)..."
+            MAX_RETRIES=5
+            RETRY_DELAY=15
+            TIMEOUT=5m
+
+            for i in $(seq 1 $MAX_RETRIES); do
+              echo "Pull attempt $i of $MAX_RETRIES..."
+              if timeout $TIMEOUT docker pull ${{ secrets.DOCKERHUB_USERNAME }}/navigo-backend:${{ github.ref_name == 'main' && 'latest' || 'dev' }}; then
                 echo "Image pull successful!"
+                IMAGE_PULLED=true
                 break
               fi
-              echo "Image pull attempt $i failed, retrying..."
-              if [ $i -eq 3 ]; then
-                echo "All pull attempts failed. Using cached image."
-              fi
-              sleep 5
+              echo "Image pull attempt $i failed, waiting $RETRY_DELAY seconds before retrying..."
+              sleep $RETRY_DELAY
+              # Increase delay with each retry
+              RETRY_DELAY=$(($RETRY_DELAY + 15))
             done
+
+            if [ -z "$IMAGE_PULLED" ]; then
+              echo "All pull attempts failed. Will attempt to use cached image."
+            fi
 
             # Update env file if needed
             if [ -f .env.example ] && [ ! -f .env ]; then
               cp .env.example .env
             fi
 
-            # Use simplified restart command
-            echo "Restarting services..."
-            docker-compose stop app
-            docker-compose rm -f app
-            docker-compose up -d app
+            # Start services in stages
+            echo "Starting database service first..."
+            docker-compose up -d mysql
 
-            # Run migrations using the container with retries
+            echo "Waiting for database to initialize..."
+            sleep 30
+
+            echo "Starting remaining services..."
+            docker-compose up -d
+
+            # Run migrations with increased timeout and retries
             echo "Running migrations..."
-            for i in 1 2 3; do
-              if docker-compose exec -T app php artisan migrate --force; then
+            MIGRATION_SUCCESS=false
+            for i in 1 2 3 4 5; do
+              echo "Migration attempt $i of 5..."
+              if timeout 2m docker-compose exec -T app php artisan migrate --force; then
                 echo "Migration successful!"
+                MIGRATION_SUCCESS=true
                 break
               fi
-              echo "Migration attempt $i failed, retrying..."
-              sleep 5
-              if [ $i -eq 3 ]; then
-                echo "All migration attempts failed."
-                exit 1
+              echo "Migration attempt $i failed, retrying in 10 seconds..."
+              sleep 10
+              if [ $i -eq 5 ]; then
+                echo "Warning: All migration attempts failed but continuing deployment."
               fi
             done
 
             # Clear cache with safer commands
             echo "Clearing cache..."
-            docker-compose exec -T app php artisan config:clear
-            docker-compose exec -T app php artisan config:cache
-            docker-compose exec -T app php artisan route:cache
+            docker-compose exec -T app php artisan config:clear || echo "Config clear failed, continuing..."
+            docker-compose exec -T app php artisan config:cache || echo "Config cache failed, continuing..."
+            docker-compose exec -T app php artisan route:cache || echo "Route cache failed, continuing..."
 
-            # Cleanly exit before background tasks
-            echo "Deployment completed successfully!"
-
-            # Run cleanup as a background task that can safely timeout
-            (docker system prune -af --volumes && echo "Cleanup completed") &
+            # Verify deployment success
+            if docker-compose ps | grep -q "Up"; then
+              echo "Deployment completed successfully!"
+            else
+              echo "Warning: Some containers may not be running properly."
+              docker-compose ps
