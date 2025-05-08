@@ -25,6 +25,8 @@ RUN apk add --no-cache \
         zip \
         unzip \
         curl \
+        # Required for building PHP extensions
+        $PHPIZE_DEPS \
         libpng-dev \
         libjpeg-turbo-dev \
         libzip-dev \
@@ -34,13 +36,13 @@ RUN apk add --no-cache \
         pdo_mysql \
         bcmath \
         zip \
-    && pecl install \
-        pcntl \
         exif \
+    # pcntl is included in php-alpine by default, just need to enable it
     && docker-php-ext-enable \
-        pcntl \
         exif \
+    # Clean up build dependencies
     && apk del --no-cache \
+        $PHPIZE_DEPS \
         libpng-dev \
         libjpeg-turbo-dev \
         libzip-dev \
