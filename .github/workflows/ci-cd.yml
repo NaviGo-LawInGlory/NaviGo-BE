@@ -140,11 +140,11 @@ jobs:
             export DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
 
             if [ "$BRANCH" = "main" ]; then
-              cd ~/navigo/production || { echo "Directory ~/navigo/production not found."; exit 1; }
+              cd github/NaviGo-BE || { echo "Directory ~/navigo/production not found."; exit 1; }
               echo "Deploying production environment..."
               
               # Pull latest docker-compose config
-              wget -O docker-compose.prod.yml https://raw.githubusercontent.com/username/navigo-be/main/docker-compose.prod.yml
+              wget -O docker-compose.prod.yml https://raw.githubusercontent.com/NaviGo-LawInGlory/NaviGo-BE/main/docker-compose.prod.yml
               
               # Stop existing containers
               docker-compose -f docker-compose.prod.yml down
@@ -163,11 +163,11 @@ jobs:
               docker-compose -f docker-compose.prod.yml exec -T app php artisan migrate --force
               
             else
-              cd ~/navigo/development || { echo "Directory ~/navigo/development not found."; exit 1; }
+              cd github/NaviGo-BE || { echo "Directory ~/navigo/development not found."; exit 1; }
               echo "Deploying development environment..."
               
               # Pull latest docker-compose config
-              wget -O docker-compose.dev.yml https://raw.githubusercontent.com/username/navigo-be/dev/docker-compose.dev.yml
+              wget -O docker-compose.dev.yml https://raw.githubusercontent.com/NaviGo-LawInGlory/NaviGo-LawInGlory/dev/docker-compose.dev.yml
               
               # Stop existing containers
               docker-compose -f docker-compose.dev.yml down
