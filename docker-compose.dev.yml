@@ -2,10 +2,10 @@ version: "3.8"
 
 services:
   app:
-    image: ${DOCKER_USERNAME:-username}/navigo:dev
+    image: ${DOCKERHUB_USERNAME:-username}/navigo:dev
     build:
       context: .
-      dockerfile: dockerfile
+      dockerfile: Dockerfile
     container_name: navigo_app_dev
     volumes:
       - ./:/var/www/html
