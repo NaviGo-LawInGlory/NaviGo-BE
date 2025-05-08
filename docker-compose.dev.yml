@@ -11,9 +11,19 @@ services:
     container_name: navigo_app_dev
     entrypoint: ["/entrypoint.sh"]
     volumes:
-      - ./:/var/www/html
-      - ./storage/logs:/var/www/html/storage/logs
-      - /var/www/html/docker/scripts/entrypoint.sh
+      - ./app:/var/www/html/app
+      - ./bootstrap:/var/www/html/bootstrap
+      - ./config:/var/www/html/config
+      - ./database:/var/www/html/database
+      - ./lang:/var/www/html/lang
+      - ./public:/var/www/html/public
+      - ./resources:/var/www/html/resources
+      - ./routes:/var/www/html/routes
+      - ./storage:/var/www/html/storage
+      - ./tests:/var/www/html/tests
+      - ./artisan:/var/www/html/artisan
+      - ./composer.json:/var/www/html/composer.json
+      - ./composer.lock:/var/www/html/composer.lock
     depends_on:
       - db
     environment:
