@@ -10,7 +10,6 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        //
     }
 
     public function boot(UrlGenerator $url): void
@@ -22,4 +21,5 @@ class AppServiceProvider extends ServiceProvider
         Schema::defaultStringLength(191);
     }
 }
+
 

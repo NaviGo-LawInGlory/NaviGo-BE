@@ -14,11 +14,9 @@ class HealthCheckCommand extends Command
     public function handle()
     {
         try {
-            // Check database connection
             DB::connection()->getPdo();
             $this->info('Database connection: OK');
             
-            // Check storage directories
             $storageDirectories = ['app', 'logs', 'framework/cache', 'framework/sessions', 'framework/views'];
             $allDirectoriesWritable = true;
             
@@ -49,3 +47,4 @@ class HealthCheckCommand extends Command
         }
     }
 }
+

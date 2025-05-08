@@ -1,4 +1,3 @@
-
 FROM composer:2.6 AS composer
 
 WORKDIR /app
@@ -38,17 +37,16 @@ RUN echo 'server {\n\
 WORKDIR /var/www/html
 COPY --chown=www-data:www-data --from=composer /app /var/www/html
 
+# Copy entrypoint script and set permissions
+COPY --chown=www-data:www-data docker/scripts/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Setup storage directories
 RUN mkdir -p /var/www/html/storage/framework/{cache,sessions,views} && \
     mkdir -p /var/www/html/storage/logs && \
     chown -R www-data:www-data /var/www/html/storage
 
-# Create a simple startup script instead of using supervisor
-RUN echo '#!/bin/sh\n\
-php-fpm -D\n\
-nginx -g "daemon off;"' > /start.sh && \
-chmod +x /start.sh
-
 EXPOSE 80
 
-CMD ["/start.sh"]
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["php-fpm"]

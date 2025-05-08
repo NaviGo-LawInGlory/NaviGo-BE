@@ -7,7 +7,9 @@
     "license": "MIT",
     "require": {
         "php": "^8.2",
+        "erdemkose/generative-ai-php": "*",
         "google/apiclient": "^2.18",
+        "google/cloud-ai-platform": "*",
         "laravel/framework": "^12.0",
         "laravel/sanctum": "^4.1",
         "laravel/socialite": "^5.20",

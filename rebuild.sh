@@ -9,6 +9,9 @@ docker rmi $(docker images -q ${DOCKERHUB_USERNAME:-username}/navigo:dev) 2>/dev
 echo "Cleaning Docker build cache..."
 docker builder prune -f
 
+echo "Setting executable permissions on entrypoint.sh script..."
+chmod +x docker/scripts/entrypoint.sh
+
 echo "Building with new Dockerfile..."
 docker-compose build --no-cache app
 

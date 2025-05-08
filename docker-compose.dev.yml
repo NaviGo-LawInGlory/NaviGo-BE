@@ -9,9 +9,11 @@ services:
       args:
         - BUILDKIT_INLINE_CACHE=0
     container_name: navigo_app_dev
+    entrypoint: ["/entrypoint.sh"]
     volumes:
       - ./:/var/www/html
       - ./storage/logs:/var/www/html/storage/logs
+      - /var/www/html/docker/scripts/entrypoint.sh
     depends_on:
       - db
     environment:
