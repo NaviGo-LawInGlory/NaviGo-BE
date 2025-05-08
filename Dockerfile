@@ -1,76 +1,51 @@
-# Stage 1: PHP dependencies with Composer
-FROM composer:2.6 AS composer
+# Stage 1: Composer dependencies
+FROM composer:2 AS composer
 
 WORKDIR /app
 COPY composer.json composer.lock ./
+RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist
 
-# Install dependencies and generate optimized autoloader
-RUN composer install --prefer-dist --no-scripts --no-dev --no-autoloader --optimize-autoloader && \
-    composer dump-autoload --no-scripts --no-dev --optimize
-
-# Copy the rest of the application code
 COPY . .
+RUN composer dump-autoload --no-dev --optimize
 
-# Stage 2: Production PHP environment
+# Stage 2: PHP runtime
 FROM php:8.2-fpm
 
-# Install system dependencies
+# Install essential packages and PHP extensions
 RUN apt-get update && apt-get install -y \
-        nginx \
-        supervisor \
-        libpng-dev \
-        libjpeg-dev \
-        libfreetype6-dev \
-        libzip-dev \
-        zip \
-        unzip \
-        curl \
+    nginx \
+    zip \
+    unzip \
+    supervisor \
+    && docker-php-ext-install pdo_mysql \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install PHP extensions using the pre-built extensions where possible
-RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install -j$(nproc) \
-        gd \
-        pdo_mysql \
-        bcmath \
-        zip \
-        exif \
-        pcntl
-
-# Configure PHP and Nginx
-COPY docker/php/local.ini /usr/local/etc/php/conf.d/local.ini
+# Configure nginx and PHP
 COPY docker/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf
+COPY docker/php/local.ini /usr/local/etc/php/conf.d/local.ini
 
-# Create supervisor config file
-COPY --chmod=644 <<'EOF' /etc/supervisor/conf.d/supervisord.conf
-[supervisord]
-nodaemon=true
+# Configure Supervisor
+RUN echo "[supervisord]\nnodaemon=true\n\n\
+[program:php-fpm]\ncommand=php-fpm\n\n\
+[program:nginx]\ncommand=nginx -g 'daemon off;'" > /etc/supervisor/conf.d/supervisord.conf
 
-[program:php-fpm]
-command=php-fpm
-stdout_logfile=/dev/stdout
-stdout_logfile_maxbytes=0
-stderr_logfile=/dev/stderr
-stderr_logfile_maxbytes=0
-
-[program:nginx]
-command=nginx -g "daemon off;"
-stdout_logfile=/dev/stdout
-stdout_logfile_maxbytes=0
-stderr_logfile=/dev/stderr
-stderr_logfile_maxbytes=0
-EOF
-
-# Copy application files and entrypoint script
+# Copy application files
 WORKDIR /var/www/html
 COPY --chown=www-data:www-data --from=composer /app /var/www/html
-COPY --chmod=755 docker/scripts/entrypoint.sh /entrypoint.sh
 
-# Set up storage directories
+# Setup storage directories
 RUN mkdir -p /var/www/html/storage/framework/{cache,sessions,views} \
     && mkdir -p /var/www/html/storage/logs \
     && chown -R www-data:www-data /var/www/html/storage
+
+# Create a simple entrypoint script
+RUN echo '#!/bin/sh\n\
+set -e\n\
+chown -R www-data:www-data /var/www/html/storage\n\
+php artisan storage:link || true\n\
+exec "$@"' > /entrypoint.sh \
+    && chmod +x /entrypoint.sh
 
 EXPOSE 80
 
