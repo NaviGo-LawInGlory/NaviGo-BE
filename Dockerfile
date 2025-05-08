@@ -12,49 +12,38 @@ RUN composer install --prefer-dist --no-scripts --no-dev --no-autoloader --optim
 COPY . .
 
 # Stage 2: Production PHP environment
-FROM php:8.2-fpm-alpine
+FROM php:8.2-fpm
 
-# Install essential dependencies and extensions
-RUN apk add --no-cache \
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
         nginx \
         supervisor \
-        libpng \
-        libjpeg-turbo \
-        libzip \
-        freetype \
+        libpng-dev \
+        libjpeg-dev \
+        libfreetype6-dev \
+        libzip-dev \
         zip \
         unzip \
         curl \
-        # Required for building PHP extensions
-        $PHPIZE_DEPS \
-        libpng-dev \
-        libjpeg-turbo-dev \
-        libzip-dev \
-        freetype-dev \
-    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install PHP extensions using the pre-built extensions where possible
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) \
+        gd \
         pdo_mysql \
         bcmath \
         zip \
         exif \
-    # pcntl is included in php-alpine by default, just need to enable it
-    && docker-php-ext-enable \
-        exif \
-    # Clean up build dependencies
-    && apk del --no-cache \
-        $PHPIZE_DEPS \
-        libpng-dev \
-        libjpeg-turbo-dev \
-        libzip-dev \
-        freetype-dev
+        pcntl
 
 # Configure PHP and Nginx
 COPY docker/php/local.ini /usr/local/etc/php/conf.d/local.ini
-COPY docker/nginx/conf.d/default.conf /etc/nginx/http.d/default.conf
+COPY docker/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf
 
 # Create supervisor config file
-RUN mkdir -p /etc/supervisor.d/
-COPY --chmod=644 <<'EOF' /etc/supervisor.d/supervisord.ini
+COPY --chmod=644 <<'EOF' /etc/supervisor/conf.d/supervisord.conf
 [supervisord]
 nodaemon=true
 
@@ -86,4 +75,4 @@ RUN mkdir -p /var/www/html/storage/framework/{cache,sessions,views} \
 EXPOSE 80
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor.d/supervisord.ini"]
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
