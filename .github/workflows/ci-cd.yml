@@ -5,155 +5,107 @@ on:
     branches:
       - main
       - dev
-    paths-ignore:
-      - "**.md"
-      - ".github/**"
-      - "!.github/workflows/ci-cd.yml"
   pull_request:
     branches:
       - main
       - dev
 
 jobs:
-  debug-trigger:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Debug workflow trigger
-        run: |
-          echo "Workflow triggered!"
-          echo "Branch name: ${{ github.ref }}"
-          echo "Event name: ${{ github.event_name }}"
-          echo "Repository: ${{ github.repository }}"
-
   build-and-test:
-    needs: debug-trigger
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: navigo_test
+          MYSQL_ROOT_PASSWORD: password
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-        with:
-          ref: ${{ github.ref }}
 
-      - name: Set up PHP
+      - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.2"
-          extensions: mbstring, pdo_mysql, exif, pcntl, bcmath, zip, intl, opcache
+          extensions: mbstring, dom, fileinfo, mysql, gd
+          coverage: xdebug
 
-      - name: Copy .env file
-        run: cp .env.example .env
+      - name: Copy .env
+        run: cp .env.example .env.testing
+
+      - name: Set testing environment variables
+        run: |
+          sed -i "s/DB_CONNECTION=mysql/DB_CONNECTION=mysql/" .env.testing
+          sed -i "s/DB_HOST=127.0.0.1/DB_HOST=127.0.0.1/" .env.testing
+          sed -i "s/DB_PORT=3306/DB_PORT=3306/" .env.testing
+          sed -i "s/DB_DATABASE=navigo/DB_DATABASE=navigo_test/" .env.testing
+          sed -i "s/DB_USERNAME=root/DB_USERNAME=root/" .env.testing
+          sed -i "s/DB_PASSWORD=/DB_PASSWORD=password/" .env.testing
+
+      - name: Get composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache composer dependencies
+        uses: actions/cache@v3
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
 
       - name: Install dependencies
         run: composer install --prefer-dist --no-progress
 
-      - name: Generate app key
-        run: php artisan key:generate
+      - name: Generate application key
+        run: php artisan key:generate --env=testing
 
-      - name: Create SQLite database
-        run: |
-          mkdir -p database
-          touch database/database.sqlite
-
-      - name: Configure environment for testing
-        run: |
-          echo "DB_CONNECTION=sqlite" >> .env
-          echo "DB_DATABASE=database/database.sqlite" >> .env
-
-      - name: Run tests
+      - name: Run PHPUnit tests
         run: php artisan test
 
   docker:
     needs: build-and-test
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
     env:
       BRANCH: ${{ github.ref_name }}
-    timeout-minutes: 45
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-        with:
-          ref: ${{ github.ref }}
 
-      - name: Display branch information
-        run: |
-          echo "Building for branch: ${{ github.ref_name }}"
-          echo "Full ref: ${{ github.ref }}"
-
-      - name: Set up Docker Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v2
-        with:
-          version: latest
-
-      - name: Login to DockerHub
+      - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # Cache Docker layers
-      - name: Set up Docker layer caching
-        uses: actions/cache@v3
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
 
-      # Extract metadata for Docker
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/navigo-backend
-          tags: |
-            type=ref,event=branch
-            type=sha,prefix=
-            latest
-
-      # Optimize composer install in a separate step
-      - name: Build composer dependencies image
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          file: ./docker/composer.Dockerfile
-          push: false
-          tags: composer-deps:latest
-          target: composer-deps
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-          outputs: type=docker,dest=/tmp/composer-deps.tar
-
-      # Build final image based on branch
-      - name: Build and push final image
-        id: docker_build
-        uses: docker/build-push-action@v4
-        timeout-minutes: 30
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/navigo-backend:${{ github.ref_name == 'main' && 'latest' || 'dev' }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-          build-args: |
-            PHP_VERSION=8.2
-            COMPOSER_INSTALL_FLAGS=--no-dev --optimize-autoloader
-          # Add more debug output
-          no-cache: false
-          provenance: false
-
-      # Temp fix for cache
-      - name: Move cache
+      - name: Build and push Docker image
         run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
-
-      # Report build result
-      - name: Image digest
-        run: echo ${{ steps.docker_build.outputs.digest }}
+          echo "Building image for branch: $BRANCH"
+          case "$BRANCH" in
+            "main")
+              echo "Building production image..."
+              docker buildx build --push \
+                --tag ${{ secrets.DOCKER_USERNAME }}/navigo:latest \
+                --tag ${{ secrets.DOCKER_USERNAME }}/navigo:prod \
+                --file dockerfile .
+              ;;
+            "dev")
+              echo "Building development image..."
+              docker buildx build --push \
+                --tag ${{ secrets.DOCKER_USERNAME }}/navigo:dev \
+                --file dockerfile .
+              ;;
+            *)
+              echo "Branch not recognized, skipping Docker build."
+              ;;
+          esac
 
   deploy:
     needs: docker
@@ -161,147 +113,80 @@ jobs:
     if: ${{ github.event_name == 'push' }}
     env:
       BRANCH: ${{ github.ref_name }}
-    timeout-minutes: 30 # Increased from 15 to 30 minutes
     steps:
-      - name: Debug deployment branch
-        run: echo "Deploying branch ${{ github.ref_name }}"
-
-      - name: Deploy to production server
-        uses: appleboy/ssh-action@master
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v0.1.6
         with:
           host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USERNAME }}
+          username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          script_stop: true
-          command_timeout: 20m # Increased from 10m to 20m
+          port: ${{ secrets.SERVER_PORT }}
           script: |
             set -e
             trap 'echo "An error occurred. Exiting..." && exit 1' ERR
 
             BRANCH="${{ github.ref_name }}"
+            if [ -z "$BRANCH" ]; then
+              echo "Branch name is empty. Deploying development environment."
+              BRANCH="dev"
+            fi
+
             echo "Deploying branch: $BRANCH"
 
-            cd github/NaviGo-BE
+            # Set environment variables for secrets
+            export GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}"
+            export GOOGLE_CLIENT_SECRET="${{ secrets.GOOGLE_CLIENT_SECRET }}"
+            export GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}"
+            export DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
 
-            # Update the repository but don't build from it
-            git fetch --all
-            git reset --hard origin/$BRANCH
-
-            # Stop any existing containers to free up resources
-            echo "Stopping existing services..."
-            docker-compose down --remove-orphans || true
-
-            # Check for port conflicts and handle them
-            echo "Checking for port conflicts..."
-            if netstat -tuln | grep -q ':3306'; then
-              echo "Port 3306 is already in use. Using alternative port 33306 for MySQL."
-              # Ensure docker-compose file uses port 33306
-              sed -i 's/"3306:3306"/"33306:3306"/g' docker-compose.yml || true
-            fi
-
-            if netstat -tuln | grep -q ':9091'; then
-              echo "Port 9091 is already in use. Using alternative port 9092 for web service."
-              sed -i 's/"9091:80"/"9092:80"/g' docker-compose.yml || true
-            fi
-
-            # Do system cleanup before pulling new images
-            echo "Performing system cleanup..."
-            docker system prune -f || true
-
-            # Pull the latest Docker image with increased timeout and better retry logic
-            echo "Pulling Docker image (with improved retry logic)..."
-            MAX_RETRIES=5
-            RETRY_DELAY=15
-            TIMEOUT=5m
-
-            for i in $(seq 1 $MAX_RETRIES); do
-              echo "Pull attempt $i of $MAX_RETRIES..."
-              if timeout $TIMEOUT docker pull ${{ secrets.DOCKERHUB_USERNAME }}/navigo-backend:${{ github.ref_name == 'main' && 'latest' || 'dev' }}; then
-                echo "Image pull successful!"
-                IMAGE_PULLED=true
-                break
-              fi
-              echo "Image pull attempt $i failed, waiting $RETRY_DELAY seconds before retrying..."
-              sleep $RETRY_DELAY
-              # Increase delay with each retry
-              RETRY_DELAY=$(($RETRY_DELAY + 15))
-            done
-
-            if [ -z "$IMAGE_PULLED" ]; then
-              echo "All pull attempts failed. Will attempt to use cached image."
-            fi
-
-            # Update env file if needed
-            if [ -f .env.example ] && [ ! -f .env ]; then
-              cp .env.example .env
-            fi
-
-            # Update DB settings in .env to match docker-compose ports
-            if grep -q "33306" docker-compose.yml; then
-              echo "Updating .env to use port 33306 for database connections..."
-              if [ -f .env ]; then
-                sed -i 's/DB_PORT=3306/DB_PORT=33306/g' .env || true
-              fi
-            fi
-
-            # Try to start containers with error handling
-            echo "Starting services with retries..."
-            MAX_START_RETRIES=3
-            for i in $(seq 1 $MAX_START_RETRIES); do
-              echo "Start attempt $i of $MAX_START_RETRIES..."
+            if [ "$BRANCH" = "main" ]; then
+              cd ~/navigo/production || { echo "Directory ~/navigo/production not found."; exit 1; }
+              echo "Deploying production environment..."
               
-              # Start database first with a separate try-catch
-              if docker-compose up -d mysql; then
-                echo "MySQL started successfully. Waiting 30 seconds for initialization..."
-                sleep 30
-                
-                # Now try to start the remaining services
-                if docker-compose up -d; then
-                  echo "All services started successfully!"
-                  break
-                fi
-              fi
+              # Pull latest docker-compose config
+              wget -O docker-compose.prod.yml https://raw.githubusercontent.com/username/navigo-be/main/docker-compose.prod.yml
               
-              if [ $i -eq $MAX_START_RETRIES ]; then
-                echo "Warning: Failed to start all services after $MAX_START_RETRIES attempts."
-                docker-compose ps
-                echo "Continuing deployment process anyway..."
-              else
-                echo "Start attempt $i failed. Stopping containers and trying again..."
-                docker-compose down --remove-orphans
-                sleep 10
-              fi
-            done
-
-            # Run migrations with increased timeout and retries
-            echo "Running migrations..."
-            MIGRATION_SUCCESS=false
-            for i in 1 2 3 4 5; do
-              echo "Migration attempt $i of 5..."
-              if timeout 2m docker-compose exec -T app php artisan migrate --force; then
-                echo "Migration successful!"
-                MIGRATION_SUCCESS=true
-                break
-              fi
-              echo "Migration attempt $i failed, retrying in 10 seconds..."
-              sleep 10
-              if [ $i -eq 5 ]; then
-                echo "Warning: All migration attempts failed but continuing deployment."
-              fi
-            done
-
-            # Clear cache with safer commands
-            echo "Clearing cache..."
-            docker-compose exec -T app php artisan config:clear || echo "Config clear failed, continuing..."
-            docker-compose exec -T app php artisan config:cache || echo "Config cache failed, continuing..."
-            docker-compose exec -T app php artisan route:cache || echo "Route cache failed, continuing..."
-
-            # Verify deployment success
-            if docker-compose ps | grep -q "Up"; then
-              echo "Deployment completed successfully!"
-              docker-compose ps
+              # Stop existing containers
+              docker-compose -f docker-compose.prod.yml down
+              
+              # Pull latest image
+              docker pull ${{ secrets.DOCKER_USERNAME }}/navigo:prod
+              
+              # Start containers with environment variables
+              DB_PASSWORD="$DB_PASSWORD" \
+              GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" \
+              GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET" \
+              GEMINI_API_KEY="$GEMINI_API_KEY" \
+              docker-compose -f docker-compose.prod.yml up -d
+              
+              # Run migrations
+              docker-compose -f docker-compose.prod.yml exec -T app php artisan migrate --force
+              
             else
-              echo "Warning: Some containers may not be running properly."
-              docker-compose ps
-              echo "Deployment completed with warnings."
+              cd ~/navigo/development || { echo "Directory ~/navigo/development not found."; exit 1; }
+              echo "Deploying development environment..."
+              
+              # Pull latest docker-compose config
+              wget -O docker-compose.dev.yml https://raw.githubusercontent.com/username/navigo-be/dev/docker-compose.dev.yml
+              
+              # Stop existing containers
+              docker-compose -f docker-compose.dev.yml down
+              
+              # Pull latest image
+              docker pull ${{ secrets.DOCKER_USERNAME }}/navigo:dev
+              
+              # Start containers with environment variables
+              DB_PASSWORD="$DB_PASSWORD" \
+              GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" \
+              GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET" \
+              GEMINI_API_KEY="$GEMINI_API_KEY" \
+              docker-compose -f docker-compose.dev.yml up -d
+              
+              # Run migrations with fresh data
+              docker-compose -f docker-compose.dev.yml exec -T app php artisan migrate:fresh --seed
             fi
+
+            # Clean up unused Docker resources
+            docker system prune -af --volumes
+
+            echo "Deployment completed successfully."

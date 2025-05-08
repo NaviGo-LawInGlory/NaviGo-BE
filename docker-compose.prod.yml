@@ -1,0 +1,61 @@
+version: "3.8"
+
+services:
+  app:
+    image: ${DOCKER_USERNAME:-username}/navigo:prod
+    container_name: navigo_app_prod
+    restart: always
+    volumes:
+      - navigo_storage:/var/www/html/storage
+    depends_on:
+      - db
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - LOG_LEVEL=error
+      - DB_CONNECTION=mysql
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=navigo
+      - DB_USERNAME=root
+      - DB_PASSWORD=${DB_PASSWORD}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=https://your-production-domain.com/api/v1/auth/google/callback
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    ports:
+      - "80:80"
+    networks:
+      - navigo_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/up"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  db:
+    image: mysql:8.0
+    container_name: navigo_db_prod
+    restart: always
+    environment:
+      - MYSQL_DATABASE=navigo
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
+      - MYSQL_TIMEZONE=UTC
+    volumes:
+      - navigo_mysql_data_prod:/var/lib/mysql
+    networks:
+      - navigo_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+networks:
+  navigo_network:
+    driver: bridge
+
+volumes:
+  navigo_mysql_data_prod:
+  navigo_storage:

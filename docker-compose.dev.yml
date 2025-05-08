@@ -1,0 +1,73 @@
+version: "3.8"
+
+services:
+  app:
+    image: ${DOCKER_USERNAME:-username}/navigo:dev
+    build:
+      context: .
+      dockerfile: dockerfile
+    container_name: navigo_app_dev
+    volumes:
+      - ./:/var/www/html
+      - ./storage/logs:/var/www/html/storage/logs
+    depends_on:
+      - db
+    environment:
+      - APP_ENV=development
+      - APP_DEBUG=true
+      - LOG_LEVEL=debug
+      - DB_CONNECTION=mysql
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=navigo
+      - DB_USERNAME=root
+      - DB_PASSWORD=${DB_PASSWORD:-123456789}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-your-google-client-id-here}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-your-google-client-secret-here}
+      - GOOGLE_REDIRECT_URI=http://localhost:9091/api/v1/auth/google/callback
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-your-gemini-api-key-here}
+    ports:
+      - "9091:80"
+    networks:
+      - navigo_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/up"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  db:
+    image: mysql:8.0
+    container_name: navigo_db_dev
+    environment:
+      - MYSQL_DATABASE=navigo
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD:-123456789}
+      - MYSQL_TIMEZONE=UTC
+    ports:
+      - "3306:3306"
+    volumes:
+      - navigo_mysql_data_dev:/var/lib/mysql
+    networks:
+      - navigo_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  mailhog:
+    image: mailhog/mailhog
+    container_name: navigo_mailhog_dev
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - navigo_network
+
+networks:
+  navigo_network:
+    driver: bridge
+
+volumes:
+  navigo_mysql_data_dev:

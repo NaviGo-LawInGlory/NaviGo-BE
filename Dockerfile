@@ -1,146 +1,79 @@
-FROM php:8.2-fpm-alpine as builder
-
-# Install build dependencies and PHP extensions
-RUN apk --no-cache add \
-    build-base \
-    libpng-dev \
-    libjpeg-turbo-dev \
-    freetype-dev \
-    libzip-dev \
-    icu-dev \
-    oniguruma-dev \
-    libxml2-dev \
-    git
-
-# Install PHP extensions
-RUN docker-php-ext-configure gd --with-freetype --with-jpeg && \
-    docker-php-ext-install -j$(nproc) \
-    pdo_mysql \
-    mbstring \
-    exif \
-    pcntl \
-    bcmath \
-    zip \
-    intl \
-    opcache
-
-# Install composer
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+# Stage 1: PHP dependencies with Composer
+FROM composer:latest AS composer
 
 WORKDIR /app
 
-# Create scripts directory
-RUN mkdir -p /app/docker/scripts
-
-# Create entrypoint script in a safer way
-RUN echo '#!/bin/sh' > /app/docker/scripts/entrypoint.sh && \
-    echo 'set -e' >> /app/docker/scripts/entrypoint.sh && \
-    echo '' >> /app/docker/scripts/entrypoint.sh && \
-    echo '# Wait for MySQL to be ready' >> /app/docker/scripts/entrypoint.sh && \
-    echo 'echo "Checking database connection..."' >> /app/docker/scripts/entrypoint.sh && \
-    echo 'maxTries=10' >> /app/docker/scripts/entrypoint.sh && \
-    echo 'while [ "$maxTries" -gt 0 ] && ! php artisan db:monitor; do' >> /app/docker/scripts/entrypoint.sh && \
-    echo '    echo "MySQL is unavailable - sleeping"' >> /app/docker/scripts/entrypoint.sh && \
-    echo '    sleep 3' >> /app/docker/scripts/entrypoint.sh && \
-    echo '    maxTries=$(($maxTries - 1))' >> /app/docker/scripts/entrypoint.sh && \
-    echo 'done' >> /app/docker/scripts/entrypoint.sh && \
-    echo '' >> /app/docker/scripts/entrypoint.sh && \
-    echo 'if [ "$maxTries" -le 0 ]; then' >> /app/docker/scripts/entrypoint.sh && \
-    echo '    echo "Could not connect to database - proceeding anyway"' >> /app/docker/scripts/entrypoint.sh && \
-    echo 'fi' >> /app/docker/scripts/entrypoint.sh && \
-    echo '' >> /app/docker/scripts/entrypoint.sh && \
-    echo '# Setup application' >> /app/docker/scripts/entrypoint.sh && \
-    echo 'echo "Setting up application..."' >> /app/docker/scripts/entrypoint.sh && \
-    echo '' >> /app/docker/scripts/entrypoint.sh && \
-    echo '# Ensure proper directory permissions' >> /app/docker/scripts/entrypoint.sh && \
-    echo 'chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache' >> /app/docker/scripts/entrypoint.sh && \
-    echo '' >> /app/docker/scripts/entrypoint.sh && \
-    echo '# Run migrations' >> /app/docker/scripts/entrypoint.sh && \
-    echo 'if [ "$APP_ENV" != "production" ] || [ "$MIGRATE_ON_STARTUP" = "true" ]; then' >> /app/docker/scripts/entrypoint.sh && \
-    echo '    echo "Running database migrations..."' >> /app/docker/scripts/entrypoint.sh && \
-    echo '    php artisan migrate --force' >> /app/docker/scripts/entrypoint.sh && \
-    echo 'fi' >> /app/docker/scripts/entrypoint.sh && \
-    echo '' >> /app/docker/scripts/entrypoint.sh && \
-    echo '# Cache configuration in production' >> /app/docker/scripts/entrypoint.sh && \
-    echo 'if [ "$APP_ENV" = "production" ]; then' >> /app/docker/scripts/entrypoint.sh && \
-    echo '    echo "Optimizing for production..."' >> /app/docker/scripts/entrypoint.sh && \
-    echo '    php artisan config:cache' >> /app/docker/scripts/entrypoint.sh && \
-    echo '    php artisan route:cache' >> /app/docker/scripts/entrypoint.sh && \
-    echo '    php artisan view:cache' >> /app/docker/scripts/entrypoint.sh && \
-    echo 'else' >> /app/docker/scripts/entrypoint.sh && \
-    echo '    echo "Clearing cache for development..."' >> /app/docker/scripts/entrypoint.sh && \
-    echo '    php artisan config:clear' >> /app/docker/scripts/entrypoint.sh && \
-    echo '    php artisan route:clear' >> /app/docker/scripts/entrypoint.sh && \
-    echo '    php artisan view:clear' >> /app/docker/scripts/entrypoint.sh && \
-    echo 'fi' >> /app/docker/scripts/entrypoint.sh && \
-    echo '' >> /app/docker/scripts/entrypoint.sh && \
-    echo '# Create storage link if needed' >> /app/docker/scripts/entrypoint.sh && \
-    echo 'if [ ! -L /var/www/html/public/storage ]; then' >> /app/docker/scripts/entrypoint.sh && \
-    echo '    echo "Creating storage symlink..."' >> /app/docker/scripts/entrypoint.sh && \
-    echo '    php artisan storage:link' >> /app/docker/scripts/entrypoint.sh && \
-    echo 'fi' >> /app/docker/scripts/entrypoint.sh && \
-    echo '' >> /app/docker/scripts/entrypoint.sh && \
-    echo '# Start PHP-FPM' >> /app/docker/scripts/entrypoint.sh && \
-    echo 'echo "Starting PHP-FPM..."' >> /app/docker/scripts/entrypoint.sh && \
-    echo 'exec "$@"' >> /app/docker/scripts/entrypoint.sh && \
-    chmod +x /app/docker/scripts/entrypoint.sh
-
-# Copy composer files and install dependencies
 COPY composer.json composer.lock ./
+
+# Install dependencies
 RUN composer install --prefer-dist --no-scripts --no-dev --no-autoloader --optimize-autoloader
 
-# Copy application code
+# Copy the rest of the application code
 COPY . .
 
-# Generate optimized autoload files
+# Generate optimized autoloader
 RUN composer dump-autoload --no-scripts --no-dev --optimize
 
-FROM php:8.2-fpm-alpine
+# Stage 2: Production PHP environment
+FROM php:8.2-fpm
 
-# Install runtime dependencies
-RUN apk --no-cache add \
-    libpng \
-    libjpeg \
-    freetype \
-    libzip \
-    icu \
-    oniguruma \
-    libxml2 \
-    tzdata \
-    ca-certificates \
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    libpng-dev \
+    libjpeg-dev \
+    libfreetype6-dev \
+    libzip-dev \
+    zip \
+    unzip \
+    curl \
     nginx \
-    supervisor
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install gd pdo pdo_mysql zip exif pcntl bcmath \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy PHP extensions from builder
-COPY --from=builder /usr/local/lib/php/extensions/ /usr/local/lib/php/extensions/
-COPY --from=builder /usr/local/etc/php/conf.d/ /usr/local/etc/php/conf.d/
+# Configure PHP
+COPY docker/php/local.ini /usr/local/etc/php/conf.d/local.ini
+
+# Set up Nginx
+COPY docker/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf
 
 WORKDIR /var/www/html
 
-# Copy application files
-COPY --from=builder --chown=www-data:www-data /app /var/www/html
+# Copy application from Composer stage
+COPY --chown=www-data:www-data --from=composer /app /var/www/html
 
-# Create necessary directories
-RUN mkdir -p /var/www/html/storage/logs \
-    /var/www/html/storage/framework/cache \
-    /var/www/html/storage/framework/sessions \
-    /var/www/html/storage/framework/views \
-    /var/www/html/storage/app/public
+# Allow using privileged port 80
+RUN apt-get update && apt-get install -y supervisor && apt-get clean
 
-# Set permissions
-RUN chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
+# Copy the entrypoint script
+COPY docker/scripts/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# Create volumes for logs and storage
-VOLUME ["/var/www/html/storage/logs", "/var/www/html/storage"]
+# Create the supervisor configuration file
+RUN echo "[supervisord]\n\
+nodaemon=true\n\
+\n\
+[program:php-fpm]\n\
+command=php-fpm\n\
+stdout_logfile=/dev/stdout\n\
+stdout_logfile_maxbytes=0\n\
+stderr_logfile=/dev/stderr\n\
+stderr_logfile_maxbytes=0\n\
+\n\
+[program:nginx]\n\
+command=nginx -g \"daemon off;\"\n\
+stdout_logfile=/dev/stdout\n\
+stdout_logfile_maxbytes=0\n\
+stderr_logfile=/dev/stderr\n\
+stderr_logfile_maxbytes=0" > /etc/supervisor/conf.d/supervisord.conf
 
-# Make sure entrypoint script is executable
-RUN chmod +x /var/www/html/docker/scripts/entrypoint.sh
+# Prepare permissions and storage directory
+RUN mkdir -p /var/www/html/storage/framework/{cache,sessions,views} \
+    && mkdir -p /var/www/html/storage/logs \
+    && chown -R www-data:www-data /var/www/html/storage
 
-# Expose port 9000 for PHP-FPM
-EXPOSE 9000
+EXPOSE 80
 
-# Set entrypoint
-ENTRYPOINT ["/var/www/html/docker/scripts/entrypoint.sh"]
-
-# Default command
-CMD ["php-fpm"]
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
