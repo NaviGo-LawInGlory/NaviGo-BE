@@ -94,13 +94,13 @@ jobs:
               docker buildx build --push \
                 --tag ${{ secrets.DOCKERHUB_USERNAME }}/navigo:latest \
                 --tag ${{ secrets.DOCKERHUB_USERNAME }}/navigo:prod \
-                --file dockerfile .
+                --file Dockerfile .
               ;;
             "dev")
               echo "Building development image..."
               docker buildx build --push \
                 --tag ${{ secrets.DOCKERHUB_USERNAME }}/navigo:dev \
-                --file dockerfile .
+                --file Dockerfile .
               ;;
             *)
               echo "Branch not recognized, skipping Docker build."
