@@ -17,6 +17,7 @@ use Google\ApiCore\ApiException;
 use Google\GenerativeAI\GenerativeModel;
 use Google\GenerativeAI\Part;
 
+
 class GeminiController extends Controller
 {
     public function generateContent(Request $request)
@@ -62,10 +63,8 @@ class GeminiController extends Controller
             return response()->json([
                 'generated_text' => $response->text()
             ]);
-
         } catch (\Exception $e) {
             return response()->json(['message' => 'Failed to generate content: ' . $e->getMessage()], 500);
         }
     }
 }
-

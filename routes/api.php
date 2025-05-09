@@ -4,6 +4,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Api\V1\GeminiController;
+use App\Http\Controllers\LawyerController;
 
 /*
 |--------------------------------------------------------------------------
@@ -39,3 +40,5 @@ Route::prefix('v1')->group(function () {
         Route::post('gemini/generate', [GeminiController::class, 'generateContent']);
     });
 });
+
+Route::get('/lawyers', [LawyerController::class, 'index']);
