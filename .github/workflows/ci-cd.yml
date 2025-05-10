@@ -175,7 +175,6 @@ jobs:
               wget -O docker-compose.prod.yml https://raw.githubusercontent.com/NaviGo-LawInGlory/NaviGo-BE/main/docker-compose.prod.yml
               
               docker-compose -f docker-compose.prod.yml down
-              
               docker pull ${{ secrets.DOCKERHUB_USERNAME }}/navigo:prod
               
               DB_PASSWORD="$DB_PASSWORD" \
