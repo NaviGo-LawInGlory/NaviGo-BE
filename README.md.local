@@ -1,0 +1,49 @@
+# Navigo Backend Setup Instructions
+
+## Database Connection Options
+
+You can run this application in two ways:
+
+### Option 1: Running directly on your machine
+
+1. Ensure you have a local MySQL server running on port 3306
+2. Make sure your .env file has the following settings:
+   ```
+   DB_HOST=127.0.0.1
+   DB_PORT=3306
+   DB_DATABASE=navigo
+   DB_USERNAME=root
+   DB_PASSWORD=123456789
+   ```
+3. Run database migrations:
+   ```
+   php artisan migrate:fresh
+   ```
+
+### Option 2: Running with Docker (recommended)
+
+1. Make sure Docker and Docker Compose are installed
+2. In your .env file, use these settings:
+   ```
+   DB_HOST=db
+   DB_PORT=3306
+   DB_DATABASE=navigo
+   DB_USERNAME=root
+   DB_PASSWORD=123456789
+   ```
+3. Start the containers:
+   ```
+   docker-compose -f docker-compose.dev.yml up -d
+   ```
+4. Run database migrations inside the container:
+   ```
+   ./artisan.sh migrate:fresh
+   ```
+   or
+   ```
+   docker exec -it navigo_app_dev php artisan migrate:fresh
+   ```
+
+## Switching Between Environments
+
+The provided `artisan.sh` script automatically runs artisan commands inside the Docker container.
