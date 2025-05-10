@@ -21,7 +21,7 @@ Route::prefix('v1')->group(function () {
     
     Route::middleware(['web'])->group(function () {
         Route::get('/google', [AuthController::class, 'redirectToGoogle']);
-        Route::get('/google/callback', [AuthController::class, 'handleGoogleCallback']);
+        Route::get('/auth/google/callback', [AuthController::class, 'handleGoogleCallback']);
     });
     
     Route::post('/google', [AuthController::class, 'loginWithGoogle']);
