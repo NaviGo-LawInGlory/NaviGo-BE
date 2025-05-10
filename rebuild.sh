@@ -24,4 +24,16 @@ docker-compose build --no-cache app
 echo "Starting containers..."
 docker-compose up -d
 
+echo "Waiting for MySQL to initialize (30 seconds)..."
+sleep 30
+
+echo "Checking database connection..."
+docker-compose exec app php artisan db:monitor
+
+if [ $? -ne 0 ]; then
+  echo "Database connection failed. Exiting."
+  exit 1
+fi
+
 echo "Done! Application is now running with the new minimal Dockerfile."
+echo "You can access the application at http://localhost:9091"

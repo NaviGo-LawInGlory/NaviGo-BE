@@ -26,7 +26,8 @@ services:
       - ./composer.lock:/var/www/html/composer.lock
       - ./docker/scripts/entrypoint.sh:/entrypoint.sh
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
       - APP_ENV=development
       - APP_DEBUG=true
@@ -66,10 +67,22 @@ services:
     networks:
       - navigo_network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 10s
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-p${DB_PASSWORD:-123456789}",
+        ]
+      interval: 5s
       timeout: 5s
-      retries: 3
+      retries: 10
+      start_period: 10s
+    command: --default-authentication-plugin=mysql_native_password
 
   mailhog:
     image: mailhog/mailhog

@@ -1,17 +1,19 @@
 #!/bin/sh
 set -e
 
-# Wait for MySQL to be ready
+# Wait for MySQL to be ready with better connection check
 echo "Checking database connection..."
-maxTries=10
-while [ "$maxTries" -gt 0 ] && ! php artisan db:monitor; do
-    echo "MySQL is unavailable - sleeping"
-    sleep 3
+maxTries=30
+sleepTime=3
+until php artisan db:monitor || [ "$maxTries" -le 0 ]
+do
+    echo "MySQL is unavailable - sleeping for $sleepTime seconds"
+    sleep $sleepTime
     maxTries=$(($maxTries - 1))
 done
 
 if [ "$maxTries" -le 0 ]; then
-    echo "Could not connect to database - proceeding anyway"
+    echo "Could not connect to database - proceeding anyway but application may not work properly"
 fi
 
 # Setup application
@@ -44,6 +46,10 @@ if [ ! -L /var/www/html/public/storage ]; then
     echo "Creating storage symlink..."
     php artisan storage:link
 fi
+
+# Start Nginx
+echo "Starting Nginx..."
+nginx
 
 # Start PHP-FPM
 echo "Starting PHP-FPM..."

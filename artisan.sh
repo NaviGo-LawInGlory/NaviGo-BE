@@ -14,4 +14,5 @@ if ! docker ps | grep -q navigo_app_dev; then
 fi
 
 # Execute artisan command in the container
+echo "Running: php artisan $@"
 docker exec -it navigo_app_dev php artisan "$@"
