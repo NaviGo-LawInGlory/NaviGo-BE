@@ -24,42 +24,43 @@ echo "Setting up application..."
 echo "Setting directory permissions..."
 chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
 
-# Check if migrations table exists (to avoid running migrations that already exist)
-echo "Checking migration status..."
-MIGRATION_TABLE_EXISTS=$(php artisan tinker --execute="try { return \Schema::hasTable('migrations') ? 'true' : 'false'; } catch(\Exception \$e) { return 'false'; }" 2>/dev/null || echo "false")
-
-# Run migrations with better error handling
+# Run migrations with different strategies based on environment
 if [ "$APP_ENV" != "production" ] || [ "$MIGRATE_ON_STARTUP" = "true" ]; then
-    echo "Running migrations with improved error handling..."
+    echo "Running database migrations..."
     
-    if [ "$MIGRATION_TABLE_EXISTS" = "true" ]; then
-        echo "Migrations table exists - using standard migrate"
+    # For development with fresh migrations requested
+    if [ "$APP_ENV" != "production" ] && [ "$FRESH_MIGRATIONS" = "true" ]; then
+        echo "Preparing for fresh migrations..."
         
-        if [ "$APP_ENV" != "production" ] && [ "$FRESH_MIGRATIONS" = "true" ]; then
-            echo "Running fresh migrations with seed..."
-            php artisan migrate:fresh --seed --force || {
-                echo "Fresh migration failed. IMPORTANT: Application will continue without fresh migrations."
-                echo "You may need to manually fix schema issues."
-            }
-        else
-            echo "Running standard migrations..."
-            php artisan migrate --force || {
-                echo "Standard migrations had issues. IMPORTANT: Application will continue startup."
-                echo "You may need to manually fix specific migration errors."
-            }
-        fi
+        # Try to disable foreign key checks to make dropping tables easier
+        php artisan db:statement "SET FOREIGN_KEY_CHECKS=0;" || echo "Could not disable foreign key checks"
+        
+        # Drop tables directly with a more reliable approach
+        echo "Dropping existing tables safely..."
+        php artisan db:wipe --force || {
+            echo "db:wipe failed, trying alternative approach..."
+            # Try an alternative approach if db:wipe fails
+            php artisan migrate:reset --force || echo "Failed to reset migrations, but continuing"
+        }
+        
+        # Re-enable foreign key checks
+        php artisan db:statement "SET FOREIGN_KEY_CHECKS=1;" || echo "Could not re-enable foreign key checks"
+        
+        echo "Running fresh migrations with seed..."
+        php artisan migrate --force --seed || {
+            echo "Migration failed, but container will continue to start."
+            echo "You may need to manually fix database issues."
+        }
     else
-        echo "First-time migration - installing schema..."
-        php artisan migrate:install --force || echo "Migration install failed, but continuing"
-        
-        if [ "$APP_ENV" != "production" ] && [ "$FRESH_MIGRATIONS" = "true" ]; then
-            echo "Running initial migrations with seed..."
-            php artisan migrate --seed --force || echo "Initial migrations had issues, but continuing startup"
-        else
-            echo "Running initial migrations..."
-            php artisan migrate --force || echo "Initial migrations had issues, but continuing startup"
-        fi
+        # Standard migrations for production or when fresh not requested
+        echo "Running standard migrations..."
+        php artisan migrate --force || {
+            echo "Standard migrations had issues. Application will continue startup."
+            echo "You may need to manually fix specific migration errors."
+        }
     fi
+else
+    echo "Skipping migrations based on environment settings"
 fi
 
 # Cache configuration in production
