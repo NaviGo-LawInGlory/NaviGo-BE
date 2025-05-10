@@ -77,6 +77,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      - name: Verify entrypoint script exists
+        run: |
+          if [ ! -f "docker/scripts/entrypoint.sh" ]; then
+            echo "ERROR: entrypoint.sh does not exist at docker/scripts/entrypoint.sh"
+            exit 1
+          fi
+          echo "Entrypoint script exists. Content preview:"
+          head -n 5 docker/scripts/entrypoint.sh
+          echo "Making entrypoint script executable"
+          chmod +x docker/scripts/entrypoint.sh
+
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:

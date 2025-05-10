@@ -9,7 +9,7 @@ services:
       args:
         - BUILDKIT_INLINE_CACHE=0
     container_name: navigo_app_dev
-    entrypoint: ["/entrypoint.sh"]
+    command: ["php-fpm"]
     volumes:
       - ./app:/var/www/html/app
       - ./bootstrap:/var/www/html/bootstrap
@@ -24,6 +24,7 @@ services:
       - ./artisan:/var/www/html/artisan
       - ./composer.json:/var/www/html/composer.json
       - ./composer.lock:/var/www/html/composer.lock
+      - ./docker/scripts/entrypoint.sh:/entrypoint.sh
     depends_on:
       - db
     environment:

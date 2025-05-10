@@ -9,6 +9,12 @@ docker rmi $(docker images -q ${DOCKERHUB_USERNAME:-username}/navigo:dev) 2>/dev
 echo "Cleaning Docker build cache..."
 docker builder prune -f
 
+echo "Checking entrypoint script exists..."
+if [ ! -f "docker/scripts/entrypoint.sh" ]; then
+  echo "ERROR: entrypoint.sh does not exist at docker/scripts/entrypoint.sh"
+  exit 1
+fi
+
 echo "Setting executable permissions on entrypoint.sh script..."
 chmod +x docker/scripts/entrypoint.sh
 

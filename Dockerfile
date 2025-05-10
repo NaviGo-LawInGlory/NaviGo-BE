@@ -39,7 +39,9 @@ COPY --chown=www-data:www-data --from=composer /app /var/www/html
 
 # Copy entrypoint script and set permissions
 COPY --chown=www-data:www-data docker/scripts/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN chmod +x /entrypoint.sh && \
+    ls -la /entrypoint.sh && \
+    cat /entrypoint.sh | head -n 5
 
 # Setup storage directories
 RUN mkdir -p /var/www/html/storage/framework/{cache,sessions,views} && \
