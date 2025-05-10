@@ -42,6 +42,7 @@ services:
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-your-google-client-secret-here}
       - GOOGLE_REDIRECT_URI=http://localhost:9091/api/v1/auth/google/callback
       - GEMINI_API_KEY=${GEMINI_API_KEY:-your-gemini-api-key-here}
+      - FRESH_MIGRATIONS=true
     ports:
       - "9091:80"
     networks:
@@ -60,6 +61,8 @@ services:
       - MYSQL_DATABASE=navigo
       - MYSQL_ROOT_PASSWORD=${DB_PASSWORD:-123456789}
       - MYSQL_TIMEZONE=UTC
+      - MYSQL_INITDB_ARGS=--max_allowed_packet=128M
+      - MYSQL_INITDB_SKIP_TZINFO=1
     ports:
       - "3306:3306"
     volumes:
@@ -80,9 +83,9 @@ services:
         ]
       interval: 5s
       timeout: 5s
-      retries: 10
-      start_period: 10s
-    command: --default-authentication-plugin=mysql_native_password
+      retries: 20
+      start_period: 15s
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --skip-name-resolve
 
   mailhog:
     image: mailhog/mailhog

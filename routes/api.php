@@ -19,8 +19,11 @@ Route::prefix('v1')->group(function () {
     Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
     Route::post('/reset-password', [AuthController::class, 'resetPassword']);
     
-    Route::get('/google', [AuthController::class, 'redirectToGoogle']);
-    Route::get('/google/callback', [AuthController::class, 'handleGoogleCallback']);
+    Route::middleware(['web'])->group(function () {
+        Route::get('/google', [AuthController::class, 'redirectToGoogle']);
+        Route::get('/google/callback', [AuthController::class, 'handleGoogleCallback']);
+    });
+    
     Route::post('/google', [AuthController::class, 'loginWithGoogle']);
 });
 

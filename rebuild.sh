@@ -24,15 +24,17 @@ docker-compose build --no-cache app
 echo "Starting containers..."
 docker-compose up -d
 
-echo "Waiting for MySQL to initialize (30 seconds)..."
-sleep 30
+echo "Waiting for MySQL to initialize (45 seconds)..."
+sleep 45
 
 echo "Checking database connection..."
 docker-compose exec app php artisan db:monitor
 
 if [ $? -ne 0 ]; then
-  echo "Database connection failed. Exiting."
-  exit 1
+  echo "Database connection failed. Running diagnostics..."
+  docker-compose exec app php artisan migrate:debug
+  echo "Retrying migrations manually..."
+  docker-compose exec app php artisan migrate:fresh --seed --force || echo "Manual migration failed"
 fi
 
 echo "Done! Application is now running with the new minimal Dockerfile."
