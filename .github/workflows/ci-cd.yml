@@ -137,7 +137,7 @@ jobs:
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: 22
-          command_timeout: 1200s
+          command_timeout: 2400s
           script: |
             set -e
             trap 'echo "An error occurred. Exiting..." && exit 1' ERR

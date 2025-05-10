@@ -8,8 +8,7 @@ use App\Models\Message;
 use App\Models\Activity;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use GenerativeAI\Client;
-use GenerativeAI\Resources\Parts\TextPart;
+use Illuminate\Support\Facades\Http;
 
 class ChatController extends Controller
 {
@@ -49,8 +48,7 @@ class ChatController extends Controller
             ]);
 
             $apiKey = config('services.gemini.api_key');
-            $client = new Client($apiKey);
-
+            
             $previous = Message::where('chat_session_id', $chatSession->id)
                 ->orderBy('created_at', 'desc')
                 ->skip(1)
@@ -65,19 +63,39 @@ class ChatController extends Controller
             }
 
             $prompt = <<<EOT
-You are a legal assistant. Please respond to this query in a professional and helpful manner.
+Anda adalah penasihat hukum profesional dengan pengalaman lebih dari 20 tahun dalam memberikan nasihat hukum yang akurat dan dapat diandalkan. Tugas Anda adalah memberikan jawaban yang jelas, ringkas, dan sesuai dengan hukum yang berlaku, tanpa menyertakan disclaimer kecuali diminta secara eksplisit.
 
-Context:
+Konteks:
 {$context}
 
-User Query: {$validated['content']}
-EOT;
+Pertanyaan Pengguna: {$validated['content']}
+EOT;       
+          
+            $response = Http::withHeaders([
+                'Content-Type' => 'application/json',
+            ])->post("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={$apiKey}", [
+                'contents' => [
+                    [
+                        'parts' => [
+                            ['text' => $prompt]
+                        ]
+                    ]
+                ],
+                'generationConfig' => [
+                    'temperature' => 0.7,
+                    'topP' => 0.95,
+                    'topK' => 40,
+                    'maxOutputTokens' => 2048,
+                ],
+            ]);
 
-            $response = $client
-                ->GeminiPro()                 
-                ->generateContent(new TextPart($prompt));
+            if ($response->failed()) {
+                throw new \Exception('Gemini API error: ' . $response->body());
+            }
 
-            $responseText = $response->text();
+            $responseData = $response->json();
+            
+            $responseText = $responseData['candidates'][0]['content']['parts'][0]['text'] ?? 'Sorry, I could not generate a response.';
 
             $aiMessage = Message::create([
                 'chat_session_id' => $chatSession->id,
@@ -137,6 +155,60 @@ EOT;
                 ]);
             }
             return response()->json(['message' => 'Chat session not found'], 404);
+        }
+    }
+
+    public function createSession(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        
+        try {
+            $chatSession = ChatSession::create(['user_id' => $user->id]);
+            
+            Activity::create([
+                'user_id' => $user->id,
+                'type'    => 'chat',
+                'title'   => 'New Chat Session',
+            ]);
+            
+            return response()->json([
+                'id'         => $chatSession->id,
+                'messages'   => [],
+                'created_at' => $chatSession->created_at->toISOString(),
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to create chat session: '.$e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function getAllSessions(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        
+        try {
+            $chatSessions = ChatSession::where('user_id', $user->id)
+                ->latest()
+                ->get()
+                ->map(function ($session) {
+                    $firstMessage = $session->messages()->orderBy('created_at')->first();
+                    
+                    return [
+                        'id' => $session->id,
+                        'created_at' => $session->created_at->toISOString(),
+                        'preview' => $firstMessage ? substr($firstMessage->content, 0, 100) : '',
+                        'message_count' => $session->messages()->count()
+                    ];
+                });
+            
+            return response()->json($chatSessions);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to retrieve chat sessions: '.$e->getMessage()
+            ], 500);
         }
     }
 }

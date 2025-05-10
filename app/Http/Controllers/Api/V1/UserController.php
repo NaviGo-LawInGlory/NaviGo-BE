@@ -7,6 +7,7 @@ use App\Models\Activity;
 use App\Models\Document;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Validator;
 
 class UserController extends Controller
 {
@@ -20,6 +21,43 @@ class UserController extends Controller
             'email' => $user->email,
             'created_at' => $user->created_at,
             'account_type' => $user->account_type,
+            'location' => $user->location,
+            'phone' => $user->phone,
+            'bio' => $user->bio,
+        ]);
+    }
+
+    public function updateProfile(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'name' => 'required|string|max:255',
+            'location' => 'nullable|string|max:255',
+            'phone' => 'nullable|string|max:20',
+            'bio' => 'nullable|string|max:1000',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        $user = $request->user();
+        
+        $user->update([
+            'name' => $request->input('name'),
+            'location' => $request->input('location'),
+            'phone' => $request->input('phone'),
+            'bio' => $request->input('bio'),
+        ]);
+        
+        return response()->json([
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'created_at' => $user->created_at,
+            'account_type' => $user->account_type,
+            'location' => $user->location,
+            'phone' => $user->phone,
+            'bio' => $user->bio,
         ]);
     }
 
