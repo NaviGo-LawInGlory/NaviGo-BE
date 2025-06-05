@@ -1,54 +1,64 @@
-FROM composer:2.6 AS composer
+FROM php:8.2-fpm as base
 
-WORKDIR /app
-COPY composer.json composer.lock ./
-RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist --optimize-autoloader
-
-COPY . .
-RUN composer dump-autoload --no-dev --optimize
-
-# Stage 2: Minimal PHP runtime with Alpine
-FROM php:8.2-fpm-alpine
-
-# Install only essential packages and PDO MySQL extension
-RUN apk add --no-cache nginx && \
-    docker-php-ext-install pdo_mysql
-
-# Configure PHP with inline settings
-RUN echo "upload_max_filesize=40M\npost_max_size=40M\nmemory_limit=256M" > /usr/local/etc/php/conf.d/custom.ini
-
-# Configure Nginx with inline config
-RUN echo 'server {\n\
-    listen 80;\n\
-    root /var/www/html/public;\n\
-    index index.php;\n\
-    location / {\n\
-        try_files $uri $uri/ /index.php?$query_string;\n\
-    }\n\
-    location ~ \.php$ {\n\
-        fastcgi_pass 127.0.0.1:9000;\n\
-        fastcgi_index index.php;\n\
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n\
-        include fastcgi_params;\n\
-    }\n\
-}' > /etc/nginx/http.d/default.conf
-
-# Copy application files
 WORKDIR /var/www/html
-COPY --chown=www-data:www-data --from=composer /app /var/www/html
 
-# Copy entrypoint script and set permissions
-COPY --chown=www-data:www-data docker/scripts/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh && \
-    ls -la /entrypoint.sh && \
-    cat /entrypoint.sh | head -n 5
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Setup storage directories
-RUN mkdir -p /var/www/html/storage/framework/{cache,sessions,views} && \
-    mkdir -p /var/www/html/storage/logs && \
-    chown -R www-data:www-data /var/www/html/storage
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    zip \
+    unzip \
+    nginx \
+    libpng-dev \
+    libjpeg-dev \
+    libfreetype6-dev \
+    libzip-dev \
+    supervisor \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j$(nproc) gd \
+    && docker-php-ext-install pdo_mysql \
+    && docker-php-ext-install bcmath \
+    && docker-php-ext-install zip \
+    && docker-php-ext-install opcache
+
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+COPY docker/php/local.ini /usr/local/etc/php/conf.d/local.ini
+COPY docker/nginx/default.conf /etc/nginx/sites-available/default
+RUN ln -s /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default \
+    && rm /etc/nginx/sites-enabled/default.conf || true
+
+FROM base as composer_dependencies
+
+WORKDIR /var/www/html
+
+COPY composer.json composer.lock ./
+
+RUN composer install --prefer-dist --no-interaction --optimize-autoloader --no-dev
+
+FROM base as app
+
+WORKDIR /var/www/html
+
+COPY --from=composer_dependencies /var/www/html/vendor ./vendor
+COPY . .
+
+RUN php artisan optimize:clear || true
+RUN php artisan config:cache
+RUN php artisan route:cache
+RUN php artisan view:cache
+RUN php artisan event:cache
+
+RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
+RUN chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
+
+COPY docker/scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 EXPOSE 80
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["php-fpm"]
