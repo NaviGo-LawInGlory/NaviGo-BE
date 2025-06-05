@@ -1,4 +1,4 @@
-name: NaviGo CI/CD Pipeline
+name: CI/CD Pipeline
 
 on:
   push:
@@ -9,15 +9,10 @@ on:
     branches:
       - main
       - dev
-  workflow_dispatch:
+  workflow_dispatch: # Menambahkan workflow_dispatch agar bisa dijalankan manual
 
-env:
-  DB_CONNECTION_TEST: mysql
-  DB_HOST_TEST: 127.0.0.1
-  DB_PORT_TEST: 3306
-  DB_DATABASE_TEST: navigo_test
-  DB_USERNAME_TEST: root
-  DB_PASSWORD_TEST: password
+env: # Variabel env global jika ada yang dibutuhkan di beberapa job
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
 
 jobs:
   build-and-test:
@@ -27,88 +22,93 @@ jobs:
       mysql:
         image: mysql:8.0
         env:
-          MYSQL_DATABASE: ${{ env.DB_DATABASE_TEST }}
-          MYSQL_ROOT_PASSWORD: ${{ env.DB_PASSWORD_TEST }}
+          MYSQL_DATABASE: navigo_test
+          MYSQL_ROOT_PASSWORD: password
         ports:
-          - ${{ env.DB_PORT_TEST }}:${{ env.DB_PORT_TEST }}
-        options: --health-cmd="mysqladmin ping -h localhost -u root -p${{ env.DB_PASSWORD_TEST }}" --health-interval=10s --health-timeout=5s --health-retries=5
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -ppassword" --health-interval=10s --health-timeout=5s --health-retries=5 # Perbaiki healthcheck host
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4 # Versi terbaru
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.2"
-          extensions: mbstring, dom, fileinfo, pdo_mysql, gd, bcmath, intl, soap, sockets, exif, pcntl, xml, ctype
+          extensions: mbstring, dom, fileinfo, pdo_mysql, gd, bcmath, intl, sockets, exif, pcntl, xml, ctype # Mengganti mysql dengan pdo_mysql dan menambah ekstensi umum
           coverage: xdebug
-          tools: composer
+          tools: composer # Menambahkan composer via setup-php
+
+      # .env.testing akan digunakan oleh PHPUnit jika PHPUNIT_DOTENV_FILE diatur atau secara default.
+      # Pastikan phpunit.xml Anda tidak menimpa semua variabel ini jika Anda ingin .env.testing berlaku.
+      - name: Create .env.testing for PHPUnit
+        run: |
+          cp .env.example .env.testing
+          sed -i 's/^APP_ENV=.*/APP_ENV=testing/' .env.testing
+          sed -i 's/^APP_DEBUG=.*/APP_DEBUG=true/' .env.testing
+          sed -i 's/^DB_CONNECTION=.*/DB_CONNECTION=mysql/' .env.testing
+          sed -i 's/^DB_HOST=.*/DB_HOST=127.0.0.1/' .env.testing # Karena service berjalan di host runner
+          sed -i 's/^DB_PORT=.*/DB_PORT=3306/' .env.testing
+          sed -i 's/^DB_DATABASE=.*/DB_DATABASE=navigo_test/' .env.testing
+          sed -i 's/^DB_USERNAME=.*/DB_USERNAME=root/' .env.testing
+          sed -i 's/^DB_PASSWORD=.*/DB_PASSWORD=password/' .env.testing
+          echo "APP_KEY=${{ secrets.APP_KEY_TESTING }}" >> .env.testing # Gunakan secret untuk APP_KEY jika ada
 
       - name: Get composer cache directory
         id: composer-cache
         run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
 
       - name: Cache composer dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v4 # Versi terbaru
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
           key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
           restore-keys: |
             ${{ runner.os }}-composer-
 
-      - name: Install Composer dependencies
-        run: composer install --prefer-dist --no-progress --no-interaction --optimize-autoloader
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction --optimize-autoloader # Menambah --no-interaction --optimize-autoloader
 
-      - name: Generate application key for testing
-        run: php artisan key:generate --force
-        env:
-          APP_ENV: testing
-          APP_KEY: ${{ secrets.APP_KEY_TESTING }}
+      - name: Generate application key if not set by secret
+        if: secrets.APP_KEY_TESTING == '' # Hanya generate jika secret kosong
+        run: php artisan key:generate --env=testing
 
       - name: Wait for MySQL
         run: |
           echo "Waiting for MySQL to be ready..."
-          timeout 60 bash -c 'until mysqladmin ping -h ${{ env.DB_HOST_TEST }} -P ${{ env.DB_PORT_TEST }} -u ${{ env.DB_USERNAME_TEST }} -p${{ env.DB_PASSWORD_TEST }} --silent; do sleep 1; done'
+          timeout 60 bash -c 'until mysqladmin ping -h 127.0.0.1 -P 3306 -u root -ppassword --silent; do sleep 1; done'
           echo "MySQL is ready."
 
       - name: Run database migrations for tests
-        run: php artisan migrate --force
-        env:
-          APP_ENV: testing
-          DB_CONNECTION: ${{ env.DB_CONNECTION_TEST }}
-          DB_HOST: ${{ env.DB_HOST_TEST }}
-          DB_PORT: ${{ env.DB_PORT_TEST }}
-          DB_DATABASE: ${{ env.DB_DATABASE_TEST }}
-          DB_USERNAME: ${{ env.DB_USERNAME_TEST }}
-          DB_PASSWORD: ${{ env.DB_PASSWORD_TEST }}
+        # Variabel env dari .env.testing harusnya sudah dibaca oleh artisan
+        run: php artisan migrate --force --env=testing
 
       - name: Run PHPUnit tests
-        run: php artisan test
-        env:
-          APP_ENV: testing
-          DB_CONNECTION: ${{ env.DB_CONNECTION_TEST }}
-          DB_HOST: ${{ env.DB_HOST_TEST }}
-          DB_PORT: ${{ env.DB_PORT_TEST }}
-          DB_DATABASE: ${{ env.DB_DATABASE_TEST }}
-          DB_USERNAME: ${{ env.DB_USERNAME_TEST }}
-          DB_PASSWORD: ${{ env.DB_PASSWORD_TEST }}
-          XDEBUG_MODE: coverage
+        # Variabel env dari .env.testing harusnya sudah dibaca oleh PHPUnit
+        run: php artisan test --coverage-clover=coverage.xml --env=testing
 
-  build-and-push-docker:
-    name: Build Docker Image (& Push on main/dev pushes)
+  docker:
+    name: Build & Push Docker Image
     needs: build-and-test
     runs-on: ubuntu-latest
-    # Jalankan job ini untuk push KE main/dev ATAU untuk PR YANG TARGETNYA main/dev
+    # Kondisi if Anda yang sebelumnya (berjalan untuk push ATAU PR ke main/dev)
     if: (github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'dev')) || (github.event_name == 'pull_request' && (github.base_ref == 'main' || github.base_ref == 'dev')) #
     env:
-      DOCKER_IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/navigo
+      BRANCH_NAME: ${{ github.ref_name }} # Untuk push
+      PR_BASE_BRANCH: ${{ github.base_ref }} # Untuk PR
+      PR_HEAD_BRANCH: ${{ github.head_ref }} # Untuk PR
+      # Logika FORCE_REBUILD Anda, menggunakan pesan commit dari head_commit event jika tersedia
+      # Untuk PR, github.event.head_commit.message mungkin tidak selalu yang diinginkan.
+      # Lebih baik periksa pesan commit dari PR head SHA jika logika ini penting untuk PR.
+      # Namun, karena Anda bilang ini "jalan", kita pertahankan strukturnya.
+      FORCE_REBUILD: ${{ (github.event.head_commit.message == '#rebuild' || github.event.head_commit.message == 'force-rebuild' || contains(github.event.head_commit.message, '[rebuild]')) }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        # Untuk pull request, kita perlu fetch commit message dari head commit PR tersebut
         with:
-          fetch-depth: 0 # Fetches all history for all branches and tags
+          fetch-depth: 0 # Untuk mengambil pesan commit jika FORCE_REBUILD memerlukannya dari git log
 
       - name: Verify entrypoint script and set executable
         run: |
@@ -125,118 +125,104 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
-        if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'dev') # Hanya login jika akan push
-        uses: docker/login-action@v3
+        # Hanya login jika kita akan push (yaitu, event push ke main atau dev)
+        if: github.event_name == 'push' && (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'dev')
+        uses: docker/login-action@v3 # Versi terbaru
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }} # Gunakan DOCKERHUB_TOKEN
 
-      - name: Determine Docker meta
+      - name: Determine Docker Tags & Push Behavior
         id: docker_meta
         run: |
-          BRANCH_NAME=${GITHUB_REF_NAME#refs/heads/} # Untuk push
-          PR_BASE_BRANCH=${GITHUB_BASE_REF} # Untuk pull request
-          COMMIT_MESSAGE=""
-
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # Untuk PR, head_commit mungkin tidak langsung tersedia atau mungkin dari fork.
-            # Kita ambil dari event payload PR.
-            COMMIT_MESSAGE="${{ github.event.pull_request.title }} ${{ github.event.pull_request.body }}"
-            # Jika ingin pesan commit terakhir di PR branch, bisa lebih kompleks (misal, git log -1 --pretty=%B ${{ github.event.pull_request.head.sha }})
-            # Untuk sederhana, kita bisa gunakan title + body PR, atau hanya title.
-            # Atau, jika FORCE_REBUILD hanya relevan untuk push, sederhanakan ini.
-            # Untuk sekarang, kita ambil dari push event jika ada, atau default ke string kosong.
-             if [[ -n "${{ github.event.head_commit.message }}" ]]; then
-                COMMIT_MESSAGE="${{ github.event.head_commit.message }}"
-             else
-                # Jika tidak ada head_commit message (misalnya pada event PR awal),
-                # Anda bisa mengambil dari github.event.pull_request.title
-                COMMIT_MESSAGE="${{ github.event.pull_request.title }}"
-             fi
-          elif [[ -n "${{ github.event.head_commit.message }}" ]]; then
-            COMMIT_MESSAGE="${{ github.event.head_commit.message }}"
-          fi
-
-          echo "Raw commit message: $COMMIT_MESSAGE"
-
-          FORCE_REBUILD_TRIGGER="${{ contains(COMMIT_MESSAGE, '#rebuild') || contains(COMMIT_MESSAGE, 'force-rebuild') || contains(COMMIT_MESSAGE, '[rebuild]') }}"
-          echo "Force rebuild trigger evaluated to: $FORCE_REBUILD_TRIGGER"
-          echo "force_rebuild_check=${FORCE_REBUILD_TRIGGER}" >> $GITHUB_OUTPUT
-
           TAGS=""
-          # Tentukan tag berdasarkan event dan cabang
-          # Untuk push ke main
-          if [[ "${{ github.event_name }}" == "push" && "$BRANCH_NAME" == "main" ]]; then
-            TAGS="${DOCKER_IMAGE_NAME}:latest,${DOCKER_IMAGE_NAME}:prod"
-          # Untuk push ke dev
-          elif [[ "${{ github.event_name }}" == "push" && "$BRANCH_NAME" == "dev" ]]; then
-            TAGS="${DOCKER_IMAGE_NAME}:dev"
-          # Untuk PR (misalnya, buat tag sementara atau tidak ada tag untuk push)
-          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            TAGS="${DOCKER_IMAGE_NAME}:pr-${{ github.event.number }}" # Contoh tag untuk PR
-          fi
-          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
-
           SHOULD_PUSH="false"
-          if [[ "${{ github.event_name }}" == "push" && ("$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "dev") ]]; then
-            SHOULD_PUSH="true"
+          EFFECTIVE_BRANCH="" # Cabang yang digunakan untuk menentukan tag
+
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            EFFECTIVE_BRANCH="$BRANCH_NAME"
+            if [[ "$EFFECTIVE_BRANCH" == "main" || "$EFFECTIVE_BRANCH" == "dev" ]]; then
+              SHOULD_PUSH="true"
+            fi
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # Untuk PR, kita bisa gunakan PR number atau head branch sebagai basis tag
+            # dan kita tidak akan push
+            EFFECTIVE_BRANCH="pr-${{ github.event.number }}-${PR_HEAD_BRANCH//\//-}" # Ganti / dengan - pada nama branch
           fi
+
+          echo "Effective branch for tagging: $EFFECTIVE_BRANCH"
+
+          if [[ "$EFFECTIVE_BRANCH" == "main" ]]; then
+            TAGS="${DOCKERHUB_USERNAME}/navigo:latest,${DOCKERHUB_USERNAME}/navigo:prod"
+          elif [[ "$EFFECTIVE_BRANCH" == "dev" ]]; then
+            TAGS="${DOCKERHUB_USERNAME}/navigo:dev"
+          elif [[ "$EFFECTIVE_BRANCH" == pr-* ]]; then # Jika ini PR build
+            TAGS="${DOCKERHUB_USERNAME}/navigo:${EFFECTIVE_BRANCH}" # Contoh: username/navigo:pr-123-feature-xyz
+          else
+            echo "Branch $EFFECTIVE_BRANCH / Event ${{ github.event_name }} not configured for specific Docker tagging. Build may be skipped or use default."
+          fi
+
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
           echo "should_push=${SHOULD_PUSH}" >> $GITHUB_OUTPUT
 
-          BUILD_ARGS="PHP_VERSION=8.2 NODE_VERSION=18"
-          echo "build_args=${BUILD_ARGS}" >> $GITHUB_OUTPUT
+          # Evaluasi ulang FORCE_REBUILD di sini dengan pesan commit yang lebih pasti jika perlu
+          # Untuk saat ini, kita gunakan env.FORCE_REBUILD yang sudah Anda definisikan
+          echo "FORCE_REBUILD env var is: ${{ env.FORCE_REBUILD }}"
 
-      - name: Echo evaluated conditions
-        run: |
-          echo "Commit Message used for check: ${{ steps.docker_meta.outputs.commit_message_for_check }}"
-          echo "Force rebuild check: ${{ steps.docker_meta.outputs.force_rebuild_check }}"
-          echo "Tags: ${{ steps.docker_meta.outputs.tags }}"
-          echo "Should push: ${{ steps.docker_meta.outputs.should_push }}"
-
-      - name: Build and potentially push Docker image
-        if: steps.docker_meta.outputs.tags != '' # Hanya build jika ada tag yang ditentukan
-        uses: docker/build-push-action@v5
+      - name: Build and (conditionally) push Docker image
+        if: steps.docker_meta.outputs.tags != '' # Hanya build jika ada tag yang dihasilkan
+        uses: docker/build-push-action@v5 # Versi terbaru
         with:
           context: .
           file: ./Dockerfile
-          push: ${{ steps.docker_meta.outputs.should_push == 'true' }} #
+          # Push hanya jika SHOULD_PUSH adalah true (push ke main/dev)
+          push: ${{ steps.docker_meta.outputs.should_push == 'true' }}
           tags: ${{ steps.docker_meta.outputs.tags }}
-          build-args: ${{ steps.docker_meta.outputs.build_args }}
-          cache-from: type=registry,ref=${{ env.DOCKER_IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.DOCKER_IMAGE_NAME }}:buildcache,mode=max
-          no-cache: ${{ steps.docker_meta.outputs.force_rebuild_check == 'true' }}
+          # Gunakan env.FORCE_REBUILD yang sudah ada di job level.
+          # Pastikan Dockerfile Anda memiliki ARG untuk BUILDKIT_INLINE_CACHE jika ingin mengontrolnya dari sini.
+          # Namun, cache-from dan cache-to lebih direkomendasikan.
+          # build-args: | # Contoh jika Dockerfile Anda punya ARG ini
+          #   BUILDKIT_INLINE_CACHE=1
+          #   PHP_VERSION=8.2
+          no-cache: ${{ env.FORCE_REBUILD == 'true' }} # Menggunakan FORCE_REBUILD dari env job
+          cache-from: type=registry,ref=${{ env.DOCKERHUB_USERNAME }}/navigo:buildcache
+          cache-to: type=registry,ref=${{ env.DOCKERHUB_USERNAME }}/navigo:buildcache,mode=max
 
-  deploy-to-server:
+  deploy:
     name: Deploy to Server
-    needs: build-and-push-docker
+    needs: docker
     runs-on: ubuntu-latest
-    # Deploy hanya jika ada push ke main atau dev
+    # Hanya deploy jika ada push ke main atau dev
     if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'dev')
-    environment:
+    environment: # Menambahkan environment context untuk approval (opsional)
       name: ${{ github.ref_name == 'main' && 'production' || 'development' }}
       url: ${{ github.ref_name == 'main' && secrets.PROD_APP_URL || secrets.DEV_APP_URL }}
+
     steps:
       - name: Deploy to server
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1.0.3 # Versi terbaru
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: 22
-          command_timeout: 10m
+          command_timeout: 20m # Mengurangi timeout sedikit, bisa disesuaikan
           script: |
-            set -e
-            BRANCH="${{ github.ref_name }}"
-            DOCKERHUB_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
-            TARGET_DIR="github/NaviGo-BE" # Sesuaikan path ini
-            COMPOSE_FILE_NAME=""
-            IMAGE_TAG=""
-            ENV_FILE_CONTENT=""
+            set -e # Hentikan jika ada error
 
-            if [ "$BRANCH" = "main" ]; then
-              COMPOSE_FILE_NAME="docker-compose.prod.yml"
-              IMAGE_TAG="prod"
-              ENV_FILE_CONTENT=$(cat <<EOF
+            CURRENT_BRANCH="${{ github.ref_name }}"
+            TARGET_DIR="github/NaviGo-BE" # Sesuaikan dengan path di server Anda
+            COMPOSE_FILE=""
+            IMAGE_TO_PULL=""
+            ENV_VARS=""
+
+            echo "Deploying branch: $CURRENT_BRANCH"
+
+            # Persiapan variabel berdasarkan cabang
+            if [ "$CURRENT_BRANCH" = "main" ]; then
+              COMPOSE_FILE="docker-compose.prod.yml"
+              IMAGE_TO_PULL="${{ env.DOCKERHUB_USERNAME }}/navigo:prod"
+              ENV_VARS=$(cat <<EOF
             APP_ENV=production
             APP_DEBUG=false
             APP_KEY=${{ secrets.APP_KEY_PROD }}
@@ -253,13 +239,13 @@ jobs:
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY_PROD }}
             MIGRATE_ON_STARTUP=true
             FRESH_MIGRATIONS=false
-            DOCKERHUB_USERNAME=${DOCKERHUB_USERNAME}
+            DOCKERHUB_USERNAME=${{ env.DOCKERHUB_USERNAME }}
             EOF
             )
-            elif [ "$BRANCH" = "dev" ]; then
-              COMPOSE_FILE_NAME="docker-compose.dev.yml"
-              IMAGE_TAG="dev"
-              ENV_FILE_CONTENT=$(cat <<EOF
+            elif [ "$CURRENT_BRANCH" = "dev" ]; then
+              COMPOSE_FILE="docker-compose.dev.yml"
+              IMAGE_TO_PULL="${{ env.DOCKERHUB_USERNAME }}/navigo:dev"
+              ENV_VARS=$(cat <<EOF
             APP_ENV=development
             APP_DEBUG=true
             APP_KEY=${{ secrets.APP_KEY_DEV }}
@@ -276,43 +262,43 @@ jobs:
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY_DEV }}
             MIGRATE_ON_STARTUP=true
             FRESH_MIGRATIONS=true
-            DOCKERHUB_USERNAME=${DOCKERHUB_USERNAME}
+            DOCKERHUB_USERNAME=${{ env.DOCKERHUB_USERNAME }}
             EOF
             )
             else
-              echo "Branch $BRANCH not configured for deployment. Exiting."
-              exit 0
+              echo "Deployment not configured for branch $CURRENT_BRANCH."
+              exit 1
             fi
 
-            echo "Deploying branch: $BRANCH to $TARGET_DIR using $COMPOSE_FILE_NAME"
             mkdir -p "$TARGET_DIR"
-            cd "$TARGET_DIR" || exit 1
+            cd "$TARGET_DIR" || { echo "Failed to cd into $TARGET_DIR"; exit 1; }
 
-            echo "Fetching compose file from https://raw.githubusercontent.com/NaviGo-LawInGlory/NaviGo-BE/$BRANCH/$COMPOSE_FILE_NAME"
-            wget -O "$COMPOSE_FILE_NAME" "https://raw.githubusercontent.com/NaviGo-LawInGlory/NaviGo-BE/$BRANCH/$COMPOSE_FILE_NAME"
+            echo "Fetching $COMPOSE_FILE for branch $CURRENT_BRANCH..."
+            wget -O "$COMPOSE_FILE" "https://raw.githubusercontent.com/${{ github.repository }}/$CURRENT_BRANCH/$COMPOSE_FILE"
 
-            echo "Creating .env file"
-            echo "$ENV_FILE_CONTENT" > .env
+            echo "Creating .env file..."
+            echo "$ENV_VARS" > .env
 
-            echo "Pulling latest image: ${DOCKERHUB_USERNAME}/navigo:${IMAGE_TAG}"
-            docker pull "${DOCKERHUB_USERNAME}/navigo:${IMAGE_TAG}"
+            echo "Pulling Docker image: $IMAGE_TO_PULL..."
+            docker pull "$IMAGE_TO_PULL"
 
-            echo "Stopping and removing old containers (if any)..."
-            docker-compose -f "$COMPOSE_FILE_NAME" down --remove-orphans || echo "No containers to stop/remove or docker-compose file not found initially, continuing..."
+            echo "Stopping existing services (if any)..."
+            docker-compose -f "$COMPOSE_FILE" down --remove-orphans || echo "No services to stop or docker-compose file not found initially."
 
-            echo "Starting new containers..."
-            docker-compose -f "$COMPOSE_FILE_NAME" up -d
+            echo "Starting services with $COMPOSE_FILE..."
+            # Variabel lingkungan dari file .env akan otomatis dibaca oleh docker-compose
+            docker-compose -f "$COMPOSE_FILE" up -d
 
-            if [ "$BRANCH" = "main" ]; then
-              echo "Waiting for production container..."
-              sleep 30
-              echo "Running production migrations..."
-              docker-compose -f "$COMPOSE_FILE_NAME" exec -T app php artisan migrate --force || echo "Production migration may have failed."
+            if [ "$CURRENT_BRANCH" = "main" ]; then
+              echo "Running migrations for production..."
+              # Tunggu beberapa saat agar container app siap
+              sleep 45 
+              docker-compose -f "$COMPOSE_FILE" exec -T app php artisan migrate --force || echo "Production migration finished with potential issues."
             else
-              echo "Development environment deployed. Migrations handled by entrypoint (FRESH_MIGRATIONS set in .env)."
+              echo "Development environment deployed. Migrations (including fresh if set) handled by entrypoint.sh."
             fi
 
-            echo "Cleaning up unused Docker images..."
-            docker image prune -af || echo "Image cleanup failed."
+            echo "Cleaning up unused Docker images (retaining recently pulled)..."
+            docker image prune -af --filter "until=1h" || echo "Image cleanup encountered an issue."
 
-            echo "Deployment for branch $BRANCH completed."
+            echo "Deployment for $CURRENT_BRANCH completed."
