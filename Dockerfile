@@ -39,6 +39,7 @@ COPY composer.json composer.lock ./
 COPY artisan ./
 COPY bootstrap ./bootstrap
 COPY config ./config
+COPY routes ./routes
 
 RUN composer install --prefer-dist --no-interaction --optimize-autoloader --no-dev
 
