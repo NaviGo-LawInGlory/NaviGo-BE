@@ -1,4 +1,4 @@
-FROM php:8.2-fpm as base
+FROM php:8.2-fpm AS base
 
 WORKDIR /var/www/html
 
@@ -31,15 +31,18 @@ COPY docker/nginx/default.conf /etc/nginx/sites-available/default
 RUN ln -s /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default \
     && rm /etc/nginx/sites-enabled/default.conf || true
 
-FROM base as composer_dependencies
+FROM base AS composer_dependencies
 
 WORKDIR /var/www/html
 
 COPY composer.json composer.lock ./
+COPY artisan ./
+COPY bootstrap ./bootstrap
+COPY config ./config
 
 RUN composer install --prefer-dist --no-interaction --optimize-autoloader --no-dev
 
-FROM base as app
+FROM base AS app
 
 WORKDIR /var/www/html
 
@@ -50,7 +53,6 @@ RUN php artisan optimize:clear || true
 RUN php artisan config:cache
 RUN php artisan route:cache
 RUN php artisan view:cache
-RUN php artisan event:cache
 
 RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
 RUN chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
