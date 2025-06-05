@@ -1,4 +1,4 @@
-name: CI/CD Pipeline
+name: NaviGo CI/CD Pipeline
 
 on:
   push:
@@ -9,209 +9,266 @@ on:
     branches:
       - main
       - dev
+  workflow_dispatch:
+
+env:
+  DB_CONNECTION_TEST: mysql
+  DB_HOST_TEST: 127.0.0.1
+  DB_PORT_TEST: 3306
+  DB_DATABASE_TEST: navigo_test
+  DB_USERNAME_TEST: root
+  DB_PASSWORD_TEST: password
 
 jobs:
   build-and-test:
+    name: Build & Test Application
     runs-on: ubuntu-latest
     services:
       mysql:
-        image: mysql:8.0
+        image: mysql:8.0 #
         env:
-          MYSQL_DATABASE: navigo_test
-          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: ${{ env.DB_DATABASE_TEST }} #
+          MYSQL_ROOT_PASSWORD: ${{ env.DB_PASSWORD_TEST }} #
         ports:
-          - 3306:3306
-        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+          - ${{ env.DB_PORT_TEST }}:${{ env.DB_PORT_TEST }} #
+        options: --health-cmd="mysqladmin ping -h localhost -u root -p${{ env.DB_PASSWORD_TEST }}" --health-interval=10s --health-timeout=5s --health-retries=5 #
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 #
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@v2 #
         with:
-          php-version: "8.2"
-          extensions: mbstring, dom, fileinfo, mysql, gd
-          coverage: xdebug
-
-      - name: Copy .env
-        run: cp .env.example .env.testing
-
-      - name: Set testing environment variables
-        run: |
-          sed -i "s/DB_CONNECTION=mysql/DB_CONNECTION=mysql/" .env.testing
-          sed -i "s/DB_HOST=127.0.0.1/DB_HOST=127.0.0.1/" .env.testing
-          sed -i "s/DB_PORT=3306/DB_PORT=3306/" .env.testing
-          sed -i "s/DB_DATABASE=navigo/DB_DATABASE=navigo_test/" .env.testing
-          sed -i "s/DB_USERNAME=root/DB_USERNAME=root/" .env.testing
-          sed -i "s/DB_PASSWORD=/DB_PASSWORD=password/" .env.testing
+          php-version: "8.2" #
+          extensions: mbstring, dom, fileinfo, pdo_mysql, gd, bcmath, intl, soap, sockets, exif, pcntl, xml, ctype #
+          coverage: xdebug #
+          tools: composer
 
       - name: Get composer cache directory
-        id: composer-cache
-        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+        id: composer-cache #
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT #
 
       - name: Cache composer dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4 #
         with:
-          path: ${{ steps.composer-cache.outputs.dir }}
-          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
-          restore-keys: ${{ runner.os }}-composer-
+          path: ${{ steps.composer-cache.outputs.dir }} #
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }} #
+          restore-keys: | #
+            ${{ runner.os }}-composer-
 
-      - name: Install dependencies
-        run: composer install --prefer-dist --no-progress
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction --optimize-autoloader #
 
       - name: Generate application key
-        run: php artisan key:generate --env=testing
+        run: php artisan key:generate --force #
+        env:
+          APP_ENV: testing
+          APP_KEY: ${{ secrets.APP_KEY_TESTING }}
+
+      - name: Wait for MySQL
+        run: |
+          echo "Waiting for MySQL to be ready..."
+          timeout 60 bash -c 'until mysqladmin ping -h ${{ env.DB_HOST_TEST }} -P ${{ env.DB_PORT_TEST }} -u ${{ env.DB_USERNAME_TEST }} -p${{ env.DB_PASSWORD_TEST }} --silent; do sleep 1; done'
+          echo "MySQL is ready."
+
+      - name: Run database migrations for tests
+        run: php artisan migrate --force
+        env:
+          APP_ENV: testing
+          DB_CONNECTION: ${{ env.DB_CONNECTION_TEST }}
+          DB_HOST: ${{ env.DB_HOST_TEST }}
+          DB_PORT: ${{ env.DB_PORT_TEST }}
+          DB_DATABASE: ${{ env.DB_DATABASE_TEST }}
+          DB_USERNAME: ${{ env.DB_USERNAME_TEST }}
+          DB_PASSWORD: ${{ env.DB_PASSWORD_TEST }}
 
       - name: Run PHPUnit tests
-        run: php artisan test
+        run: php artisan test #
+        env:
+          APP_ENV: testing
+          DB_CONNECTION: ${{ env.DB_CONNECTION_TEST }}
+          DB_HOST: ${{ env.DB_HOST_TEST }}
+          DB_PORT: ${{ env.DB_PORT_TEST }}
+          DB_DATABASE: ${{ env.DB_DATABASE_TEST }}
+          DB_USERNAME: ${{ env.DB_USERNAME_TEST }}
+          DB_PASSWORD: ${{ env.DB_PASSWORD_TEST }}
+          XDEBUG_MODE: coverage
 
-  docker:
-    needs: build-and-test
+  build-and-push-docker:
+    name: Build & Push Docker Image
+    needs: build-and-test #
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
-    env:
-      BRANCH: ${{ github.ref_name }}
-      FORCE_REBUILD: ${{ github.event.head_commit.message == '#rebuild' || github.event.head_commit.message == 'force-rebuild' || contains(github.event.head_commit.message, '[rebuild]') }}
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') #
+    env: #
+      DOCKER_IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/navigo #
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 #
 
-      - name: Verify entrypoint script exists
-        run: |
-          if [ ! -f "docker/scripts/entrypoint.sh" ]; then
-            echo "ERROR: entrypoint.sh does not exist at docker/scripts/entrypoint.sh"
-            exit 1
-          fi
-          echo "Entrypoint script exists. Content preview:"
-          head -n 5 docker/scripts/entrypoint.sh
-          echo "Making entrypoint script executable"
-          chmod +x docker/scripts/entrypoint.sh
+      - name: Verify entrypoint script and set executable
+        run: | #
+          if [ ! -f "docker/scripts/entrypoint.sh" ]; then #
+            echo "ERROR: entrypoint.sh does not exist at docker/scripts/entrypoint.sh" #
+            exit 1 #
+          fi #
+          chmod +x docker/scripts/entrypoint.sh #
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3 #
 
-      - name: Clean Docker cache when forced
-        if: ${{ env.FORCE_REBUILD == 'true' }}
-        run: docker buildx prune -f
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3 #
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }} #
+          password: ${{ secrets.DOCKERHUB_TOKEN }} # Gunakan DOCKERHUB_TOKEN (Access Token)
 
-      - name: Build and push Docker image
+      - name: Determine Docker tags and build args
+        id: docker_meta
         run: |
-          echo "Building image for branch: $BRANCH"
-          CACHE_FLAG=""
+          BRANCH=${GITHUB_REF_NAME} #
+          TAGS=""
+          BUILD_ARGS="PHP_VERSION=8.2 NODE_VERSION=18" # Sesuaikan dengan Dockerfile Anda
+          FORCE_REBUILD_COMMIT_MSG_CHECK="${{ contains(github.event.head_commit.message, '#rebuild') || contains(github.event.head_commit.message, 'force-rebuild') || contains(github.event.head_commit.message, '[rebuild]') }}" #
 
-          if [[ "$FORCE_REBUILD" == "true" ]]; then
-            CACHE_FLAG="--no-cache"
-            echo "Force rebuild detected - building without cache"
+          if [[ "$BRANCH" == "main" ]]; then #
+            TAGS="${DOCKER_IMAGE_NAME}:latest,${DOCKER_IMAGE_NAME}:prod" #
+          elif [[ "$BRANCH" == "dev" ]]; then #
+            TAGS="${DOCKER_IMAGE_NAME}:dev" #
+          else
+            echo "Branch $BRANCH not configured for Docker build. Skipping."
+            exit 0
           fi
 
-          case "$BRANCH" in
-            "main")
-              echo "Building production image..."
-              docker buildx build --push \
-                $CACHE_FLAG \
-                --tag ${{ secrets.DOCKERHUB_USERNAME }}/navigo:latest \
-                --tag ${{ secrets.DOCKERHUB_USERNAME }}/navigo:prod \
-                --build-arg BUILDKIT_INLINE_CACHE=0 \
-                --file Dockerfile .
-              ;;
-            "dev")
-              echo "Building development image..."
-              docker buildx build --push \
-                $CACHE_FLAG \
-                --tag ${{ secrets.DOCKERHUB_USERNAME }}/navigo:dev \
-                --build-arg BUILDKIT_INLINE_CACHE=0 \
-                --file Dockerfile .
-              ;;
-            *)
-              echo "Branch not recognized, skipping Docker build."
-              ;;
-          esac
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "build_args=${BUILD_ARGS}" >> $GITHUB_OUTPUT
+          echo "force_rebuild_commit_msg_check=${FORCE_REBUILD_COMMIT_MSG_CHECK}" >> $GITHUB_OUTPUT
 
-  deploy:
-    needs: docker
+      - name: Build and push Docker image
+        if: steps.docker_meta.outputs.tags != ''
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.docker_meta.outputs.tags }}
+          build-args: ${{ steps.docker_meta.outputs.build_args }}
+          cache-from: type=registry,ref=${{ env.DOCKER_IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.DOCKER_IMAGE_NAME }}:buildcache,mode=max
+          no-cache: ${{ steps.docker_meta.outputs.force_rebuild_commit_msg_check == 'true' }} #
+
+  deploy-to-server:
+    name: Deploy to Server
+    needs: build-and-push-docker #
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' }}
-    env:
-      BRANCH: ${{ github.ref_name }}
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') #
+    environment:
+      name: ${{ github.ref_name == 'main' && 'production' || 'development' }}
+      url: ${{ github.ref_name == 'main' && secrets.PROD_APP_URL || secrets.DEV_APP_URL }}
+
     steps:
       - name: Deploy to server
-        uses: appleboy/ssh-action@v0.1.6
+        uses: appleboy/ssh-action@v1.0.3 # Updated version
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USERNAME }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          port: 22
-          command_timeout: 2400s
+          host: ${{ secrets.SERVER_HOST }} #
+          username: ${{ secrets.SERVER_USERNAME }} #
+          key: ${{ secrets.SERVER_SSH_KEY }} #
+          port: 22 #
+          command_timeout: 10m #
           script: |
             set -e
-            # Continue on errors but log them
-            trap 'echo "An error occurred but continuing deployment..." >&2' ERR
+            BRANCH="${{ github.ref_name }}" #
+            DOCKERHUB_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}" #
+            TARGET_DIR=""
+            COMPOSE_FILE_URL=""
+            IMAGE_TAG=""
+            ENV_FILE_CONTENT=""
 
-            BRANCH="${{ github.ref_name }}"
-            if [ -z "$BRANCH" ]; then
-              echo "Branch name is empty. Deploying development environment."
-              BRANCH="dev"
-            fi
-
-            echo "Deploying branch: $BRANCH"
-            echo "Cleaning up Docker system..."
-            docker system prune -af --volumes || echo "Cleanup failed but continuing..."
-
-            export GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}"
-            export GOOGLE_CLIENT_SECRET="${{ secrets.GOOGLE_CLIENT_SECRET }}"
-            export GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}"
-            export DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
-
-            if [ "$BRANCH" = "main" ]; then
-              cd github/NaviGo-BE || { echo "Directory ~/navigo/production not found."; exit 1; }
-              echo "Deploying production environment..."
-              
-              wget -O docker-compose.prod.yml https://raw.githubusercontent.com/NaviGo-LawInGlory/NaviGo-BE/main/docker-compose.prod.yml
-              
-              docker-compose -f docker-compose.prod.yml down
-              
-              docker pull ${{ secrets.DOCKERHUB_USERNAME }}/navigo:prod
-              
-              DB_PASSWORD="$DB_PASSWORD" \
-              GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" \
-              GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET" \
-              GEMINI_API_KEY="$GEMINI_API_KEY" \
-              docker-compose -f docker-compose.prod.yml up -d
-              
-              # Wait for container to be ready
-              echo "Waiting for container to be ready..."
-              sleep 30
-              
-              docker-compose -f docker-compose.prod.yml exec -T app php artisan migrate --force || echo "Migration may have encountered issues but deployment continues"
-              
+            if [ "$BRANCH" = "main" ]; then #
+              TARGET_DIR="github/NaviGo-BE" #
+              COMPOSE_FILE_URL="https://raw.githubusercontent.com/NaviGo-LawInGlory/NaviGo-BE/main/docker-compose.prod.yml" #
+              IMAGE_TAG="prod" #
+              ENV_FILE_CONTENT=$(cat <<EOF
+            APP_ENV=production
+            APP_DEBUG=false
+            APP_KEY=${{ secrets.APP_KEY_PROD }}
+            APP_URL=${{ secrets.PROD_APP_URL }}
+            DB_CONNECTION=mysql
+            DB_HOST=db
+            DB_PORT=3306
+            DB_DATABASE=navigo
+            DB_USERNAME=root
+            DB_PASSWORD=${{ secrets.DB_PASSWORD_PROD }}
+            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID_PROD }}
+            GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET_PROD }}
+            GOOGLE_REDIRECT_URI=${{ secrets.GOOGLE_REDIRECT_URI_PROD }}
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY_PROD }}
+            MIGRATE_ON_STARTUP=true
+            FRESH_MIGRATIONS=false
+            DOCKERHUB_USERNAME=${DOCKERHUB_USERNAME}
+            EOF
+            )
+            elif [ "$BRANCH" = "dev" ]; then #
+              TARGET_DIR="github/NaviGo-BE" #
+              COMPOSE_FILE_URL="https://raw.githubusercontent.com/NaviGo-LawInGlory/NaviGo-BE/dev/docker-compose.dev.yml" #
+              IMAGE_TAG="dev" #
+              ENV_FILE_CONTENT=$(cat <<EOF
+            APP_ENV=development
+            APP_DEBUG=true
+            APP_KEY=${{ secrets.APP_KEY_DEV }}
+            APP_URL=${{ secrets.DEV_APP_URL }}
+            DB_CONNECTION=mysql
+            DB_HOST=db
+            DB_PORT=3306
+            DB_DATABASE=navigo
+            DB_USERNAME=root
+            DB_PASSWORD=${{ secrets.DB_PASSWORD_DEV }}
+            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID_DEV }}
+            GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET_DEV }}
+            GOOGLE_REDIRECT_URI=${{ secrets.GOOGLE_REDIRECT_URI_DEV }}
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY_DEV }}
+            MIGRATE_ON_STARTUP=true
+            FRESH_MIGRATIONS=true #
+            DOCKERHUB_USERNAME=${DOCKERHUB_USERNAME}
+            EOF
+            )
             else
-              cd github/NaviGo-BE || { echo "Directory ~/navigo/development not found."; exit 1; }
-              echo "Deploying development environment..."
-              
-              wget -O docker-compose.dev.yml https://raw.githubusercontent.com/NaviGo-LawInGlory/NaviGo-BE/dev/docker-compose.dev.yml
-              
-              docker-compose -f docker-compose.dev.yml down
-              
-              docker pull ${{ secrets.DOCKERHUB_USERNAME }}/navigo:dev
-              
-              # Set environment variables for fresh migrations
-              DB_PASSWORD="$DB_PASSWORD" \
-              GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" \
-              GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET" \
-              GEMINI_API_KEY="$GEMINI_API_KEY" \
-              FRESH_MIGRATIONS=true \
-              docker-compose -f docker-compose.dev.yml up -d
-              
-              echo "Development environment deployed with automatic fresh migrations"
+              echo "Branch $BRANCH not configured for deployment. Exiting."
+              exit 0
             fi
 
-            docker system prune -af --volumes || echo "Cleanup failed but continuing"
+            echo "Deploying branch: $BRANCH to $TARGET_DIR" #
+            mkdir -p "$TARGET_DIR"
+            cd "$TARGET_DIR" || exit 1
 
-            echo "Deployment completed successfully."
+            echo "Fetching compose file from $COMPOSE_FILE_URL"
+            wget -O docker-compose.yml "$COMPOSE_FILE_URL" #
+
+            echo "Creating .env file"
+            echo "$ENV_FILE_CONTENT" > .env
+
+            echo "Pulling latest image: ${DOCKERHUB_USERNAME}/navigo:${IMAGE_TAG}"
+            docker pull "${DOCKERHUB_USERNAME}/navigo:${IMAGE_TAG}" #
+
+            echo "Stopping and removing old containers..."
+            docker-compose -f docker-compose.yml down --remove-orphans || echo "No containers to stop or remove, continuing..." #
+
+            echo "Starting new containers..."
+            docker-compose -f docker-compose.yml up -d #
+
+            if [ "$BRANCH" = "main" ]; then #
+              echo "Waiting for production container to be ready (briefly)..." #
+              sleep 30 #
+              echo "Running production migrations..." #
+              docker-compose -f docker-compose.yml exec -T app php artisan migrate --force || echo "Production migration may have encountered issues but deployment continues." #
+            else
+              echo "Development environment deployed. Entrypoint handles migrations with FRESH_MIGRATIONS=${FRESH_MIGRATIONS:-false}" #
+            fi
+
+            echo "Cleaning up unused Docker images..." #
+            docker image prune -af || echo "Image cleanup failed but continuing..." #
+
+            echo "Deployment for branch $BRANCH completed."
