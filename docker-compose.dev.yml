@@ -1,0 +1,104 @@
+version: "3.8"
+
+services:
+  app:
+    image: ${DOCKERHUB_USERNAME:-username}/navigo:dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=0
+    container_name: navigo_app_dev
+    command: ["php-fpm"]
+    volumes:
+      - ./app:/var/www/html/app
+      - ./bootstrap:/var/www/html/bootstrap
+      - ./config:/var/www/html/config
+      - ./database:/var/www/html/database
+      - ./lang:/var/www/html/lang
+      - ./public:/var/www/html/public
+      - ./resources:/var/www/html/resources
+      - ./routes:/var/www/html/routes
+      - ./storage:/var/www/html/storage
+      - ./tests:/var/www/html/tests
+      - ./artisan:/var/www/html/artisan
+      - ./composer.json:/var/www/html/composer.json
+      - ./composer.lock:/var/www/html/composer.lock
+      - ./docker/scripts/entrypoint.sh:/entrypoint.sh
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - APP_ENV=development
+      - APP_DEBUG=true
+      - LOG_LEVEL=debug
+      - DB_CONNECTION=mysql
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=navigo
+      - DB_USERNAME=root
+      - DB_PASSWORD=${DB_PASSWORD:-123456789}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-your-google-client-id-here}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-your-google-client-secret-here}
+      - GOOGLE_REDIRECT_URI=http://localhost:9091/api/v1/auth/google/callback
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-your-gemini-api-key-here}
+      - FRESH_MIGRATIONS=true
+    ports:
+      - "9091:80"
+    networks:
+      - navigo_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/up"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  db:
+    image: mysql:8.0
+    container_name: navigo_db_dev
+    environment:
+      - MYSQL_DATABASE=navigo
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD:-123456789}
+      - MYSQL_TIMEZONE=UTC
+      - MYSQL_INITDB_ARGS=--max_allowed_packet=128M
+      - MYSQL_INITDB_SKIP_TZINFO=1
+    ports:
+      - "3306:3306"
+    volumes:
+      - navigo_mysql_data_dev:/var/lib/mysql
+    networks:
+      - navigo_network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-p${DB_PASSWORD:-123456789}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --skip-name-resolve
+
+  mailhog:
+    image: mailhog/mailhog
+    container_name: navigo_mailhog_dev
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - navigo_network
+
+networks:
+  navigo_network:
+    driver: bridge
+
+volumes:
+  navigo_mysql_data_dev:
