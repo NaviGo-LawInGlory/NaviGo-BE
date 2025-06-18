@@ -1,5 +1,7 @@
 # 🚀 NaviGo BE - The Powerhouse Behind Your Legal Solution ⚖️
 
+[![Final Project Pemrograman Web Lanjut - [Law in Glory / Navigo]](https://i.ytimg.com/vi/Xup02FQcCCw/maxresdefault.jpg)](http://www.youtube.com/watch?v=Xup02FQcCCw8)
+
 Welcome to the **NaviGo Backend** repository! This is the core service that powers the NaviGo platform, providing all the necessary backend functionalities. Built with Laravel, this backend is designed to be robust, secure, and scalable, handling everything from authentication to AI-powered document processing.
 
 ## ✨ Backend Features
