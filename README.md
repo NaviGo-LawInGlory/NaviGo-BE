@@ -1,185 +1,115 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# 🚀 NaviGo BE - The Powerhouse Behind Your Legal Solution ⚖️
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Welcome to the **NaviGo Backend** repository! This is the core service that powers the NaviGo platform, providing all the necessary backend functionalities. Built with Laravel, this backend is designed to be robust, secure, and scalable, handling everything from authentication to AI-powered document processing.
 
-## About Laravel
+## ✨ Backend Features
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+-   📄 **Legal Document Generator**: API to dynamically create custom legal documents based on user input.
+-   🔍 **MOU Document Analyzer**: Upload and analyze documents (PDF, DOCX) to extract key information and generate summaries using AI.
+-   🤖 **AI Law Chatbot**: Provides the backend for interactive chat sessions with an AI legal assistant powered by Google Gemini.
+-   👨‍⚖️ **Find a Lawyer**: Endpoints for searching and filtering certified lawyers based on various criteria.
+-   📊 **User Dashboard**: Manages user profile data, activity history, and document statistics.
+-   🔒 **Secure Authentication**: A secure, token-based login and registration system using Laravel Sanctum, with support for Google login.
 
--   [Simple, fast routing engine](https://laravel.com/docs/routing).
--   [Powerful dependency injection container](https://laravel.com/docs/container).
--   Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
--   Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
--   Database agnostic [schema migrations](https://laravel.com/docs/migrations).
--   [Robust background job processing](https://laravel.com/docs/queues).
--   [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## 🛠️ Tech Stack
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+-   **Framework**: Laravel
+-   **Language**: PHP
+-   **Database**: MySQL
+-   **Web Server**: Nginx
+-   **Containerization**: Docker & Docker Compose
+-   **Authentication**: Laravel Sanctum, Laravel Socialite
+-   **External APIs**: Google Gemini API
+-   **File Processing**: `phpoffice/phpword`, `smalot/pdfparser`
 
-## Learning Laravel
+## 🏁 Getting Started
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
-
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-## Laravel Sponsors
-
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
-
-### Premium Partners
-
--   **[Vehikl](https://vehikl.com/)**
--   **[Tighten Co.](https://tighten.co)**
--   **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
--   **[64 Robots](https://64robots.com)**
--   **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
--   **[DevSquad](https://devsquad.com/hire-laravel-developers)**
--   **[Redberry](https://redberry.international/laravel-development/)**
--   **[Active Logic](https://activelogic.com)**
-
-## Contributing
-
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
-
-## Code of Conduct
-
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
-
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
-
-## Docker Setup
-
-This project includes Docker configuration for easy development and deployment.
+To get a local copy up and running, follow these simple steps.
 
 ### Prerequisites
 
+Make sure you have the following installed on your machine:
+
 -   Docker
 -   Docker Compose
+-   Git
 
-### Development Setup
+### ⚙️ Installation
 
-1. Clone the repository
-2. Copy .env.example to .env:
+1.  **Clone the repository**
+    ```sh
+    git clone <YOUR_REPOSITORY_URL>
     ```
+
+2.  **Navigate to the project directory**
+    ```sh
+    cd navigo-be
+    ```
+
+3.  **Create and configure your environment file**
+    ```sh
     cp .env.example .env
     ```
-3. Start the Docker containers:
-    ```
-    docker-compose up -d
-    ```
-4. Install dependencies:
-    ```
-    docker-compose exec app composer install
-    ```
-5. Generate application key:
-    ```
-    docker-compose exec app php artisan key:generate
-    ```
-6. Run migrations:
-    ```
-    docker-compose exec app php artisan migrate
+    Next, open the `.env` file and update it with your credentials, especially for `GEMINI_API_KEY`, `GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET`.
+
+4.  **Run the Docker containers**
+    ```sh
+    docker-compose -f docker-compose.dev.yml up -d
     ```
 
-The application will be available at http://localhost:8000
+5.  **Install Composer dependencies**
+    ```sh
+    docker-compose -f docker-compose.dev.yml exec app composer install
+    ```
 
-### Running Commands
+6.  **Generate the application key**
+    ```sh
+    docker-compose -f docker-compose.dev.yml exec app php artisan key:generate
+    ```
 
-You can run Artisan commands inside the container:
+7.  **Run database migrations and seeders**
+    ```sh
+    docker-compose -f docker-compose.dev.yml exec app php artisan migrate:fresh --seed
+    ```
+
+Now, your API is running! You can access it at `http://localhost:9091`. ✨
+
+## 📜 Available Scripts
+
+You can run `artisan` commands inside the `app` container.
+
+-   **Running Artisan Commands**:
+    ```sh
+    # Using the helper script
+    ./artisan.sh <your-command>
+    
+    # Example: Clear the cache
+    ./artisan.sh cache:clear
+    ```
+
+-   **Stopping the Environment**:
+    ```sh
+    docker-compose -f docker-compose.dev.yml down
+    ```
+
+## 📁 Project Structure
+
+The project follows a standard Laravel structure.
 
 ```
-docker-compose exec app php artisan [command]
-```
-
-### Stopping the Environment
-
-```
-docker-compose down
-```
-
-### Production Deployment
-
-The repository includes GitHub Actions workflows for CI/CD. See the `.github/workflows` directory for details.
-
-For GitHub Actions CI/CD to work properly, set up these repository secrets:
-
--   `DOCKERHUB_USERNAME`: Your DockerHub username
--   `DOCKERHUB_PASSWORD`: Your DockerHub password
--   `SERVER_HOST`: Your production server hostname/IP
--   `SERVER_USERNAME`: SSH username for your production server
--   `SERVER_SSH_KEY`: Private SSH key for authentication
-
-### Troubleshooting
-
-#### Database Connection Issues
-
-If you encounter database connection errors like "getaddrinfo for db failed", make sure you're:
-
-1. Running commands inside the Docker container:
-
-    ```
-    docker-compose exec app php artisan migrate
-    ```
-
-2. Using the correct DB_HOST value in your .env file:
-    - Use `DB_HOST=db` when running inside Docker
-    - Use `DB_HOST=127.0.0.1` only when running directly on your host machine and using a local database
-
-#### Docker Container Shell Access
-
-To access your app container's shell:
-
-```
-docker-compose exec app bash
-```
-
-From there, you can run any Laravel commands directly:
-
-```
-php artisan migrate
-php artisan cache:clear
-```
-
-#### Docker Deployment Optimization
-
-The project uses a two-step process for Docker-based deployments:
-
-1. **Build and Push**: A separate workflow (`build-docker.yml`) handles building and pushing Docker images to DockerHub
-
-    - Uses layer caching to speed up builds
-    - Only runs when relevant files change
-    - Has extended timeouts for large images
-
-2. **Deploy**: The deployment workflow (`deploy.yml`) pulls and runs the Docker image on the server
-    - Uses timeouts to prevent hanging operations
-    - Updates containers without rebuilding the entire stack
-    - Runs database migrations inside the container
-    - Performs cleanup operations in the background
-
-### CI/CD Best Practices
-
-#### Force Rebuilding Docker Images
-
-You can force a complete rebuild of Docker images (ignoring cache) by including specific keywords in your commit message:
-
--   Include `#rebuild` in your commit message
--   Include `force-rebuild` in your commit message
--   Include `[rebuild]` in your commit message
-
-Example:
-
-```
-git commit -m "Update dependencies #rebuild"
+.
+├── app
+│  ├── Console/Commands   # Custom Artisan commands
+│  ├── Http/Controllers   # Controllers for handling requests
+│  ├── Models             # Eloquent models for database interaction
+│  └── Traits             # Reusable traits (e.g., DocumentUtilityTrait)
+├── config                # Application configuration files
+├── database
+│  ├── migrations         # Database schema
+│  └── seeders            # Initial data seeders
+├── docker                # Docker configurations (Nginx, PHP, scripts)
+├── routes
+│  └── api.php            # API endpoint definitions
+├── docker-compose.dev.yml  # Docker configuration for development
+└── docker-compose.prod.yml # Docker configuration for production
 ```
